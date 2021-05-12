@@ -192,6 +192,13 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
+	/*
+	 * mdts: Maximum Data Transfer
+	 * lba: Logical Block Addressing
+	 * lbads: lba Data Size (Unit: a power of two)
+	 * nsze: Namespace Size (Number of logical block)
+	 * size: namespace size, Unit byte, equals to nsze * (1 << lbads)
+	 */
 	mdts = nvmf_ctrl_mdts(nvmf_ctrl);
 	size = (1 << nvmf_ns_lbads(nvmf_ctrl, 1)) * nvmf_ns_nsze(nvmf_ctrl, 1);
 	show_result("Source ctrl conf:\n");
