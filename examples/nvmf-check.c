@@ -5,6 +5,8 @@
  */
 #include "nvmf.h"
 
+#include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -15,6 +17,7 @@
 #include <sys/poll.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #define DEBUG
@@ -56,6 +59,23 @@ void show_iov(char *tag, struct iovec *iov, int iovcnt)
 	printf("%s %s\n", tag, buf);
 }
 
+void statistics()
+{
+    static time_t prev;
+    time_t current = time(NULL);
+    if (current == prev) {
+        return;
+    }
+
+    prev = current;
+    etatime++;
+    if (etatime++ > 1) {
+        printf("[%04d]IOPS %ld, BW %ld\n", etatime, iops, bw);
+        iops = 0;
+        bw = 0;
+    }
+}
+
 void rw_cb(unsigned short status, void *opaque)
 {
 	struct check_req *req = (struct check_req *)opaque;
@@ -89,7 +109,7 @@ void test_loop(nvmf_ctrl_t nvmf_ctrl)
 	struct pollfd pfd;
 	struct check_req reqs[IODEPTH] = {0};
 	struct check_req *req;
-	int idx, k;
+	int idx, k, nready;
 	char *p, c;
 
 	pattern = calloc(4096, 26 * 2);
@@ -115,6 +135,7 @@ void test_loop(nvmf_ctrl_t nvmf_ctrl)
 	}
 
 	while (1) {
+	    statistics();
 		for (idx = 0; idx < IODEPTH; idx++) {
 			req = &reqs[idx];
 			if (!req->done) {
@@ -145,7 +166,10 @@ void test_loop(nvmf_ctrl_t nvmf_ctrl)
 		pfd.events = POLLIN;
 		pfd.revents = 0;
 
-		poll(&pfd, 1, -1);
+		while ((nready = poll(&pfd, 1, -1)) <= 0) {
+		    assert(nready != 0);
+		    assert(errno == EINTR);
+		}
 
 		nvmf_ctrl_process(nvmf_ctrl);
 	}
@@ -153,13 +177,6 @@ void test_loop(nvmf_ctrl_t nvmf_ctrl)
 
 static void alarm_handler(int signal)
 {
-	etatime++;
-
-	printf("[%04d]IOPS %ld, BW %ld\n", etatime, iops, bw);
-
-	iops = 0;
-	bw = 0;
-
 	alarm(1);
 }
 
