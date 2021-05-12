@@ -178,6 +178,9 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 	if (ret < 0) {
 		log_error("send icreq error, %m");
 		return ret;
+	} else if (ret != sizeof(icreq)) {
+	    log_error("send icreq error, %m");
+	    return ret;
 	}
 
 	ret = recv(tcp_queue->sockfd, &icresp, sizeof(icresp), 0);
@@ -221,6 +224,7 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 		return -EINVAL;
 	}
 
+	/* TODO support cpda */
 	if (icresp.cpda != 0) {
 		log_error("cpda error, queue %d, cpda %d\n", nvmf_tcp_queue_id(tcp_queue),
                           icresp.cpda);
@@ -781,7 +785,7 @@ static int nvmf_tcp_queue_handle_rsp(struct nvmf_tcp_queue *tcp_queue, struct nv
 
 	nvmf_req_set_done(req, true);
 
-	log_debug("queue[%d] handle rsp, queue: %d, result: 0x%lx, req[%p] tag[0x%x] sq_head: %d, "
+	log_debug("queue[%d] handle rsp, queue: %d, result: 0x%llx, req[%p] tag[0x%x] sq_head: %d, "
                   "sq_id: %d, command_id: 0x%x, status: 0x%x\n", tcp_queue->queue->qid,
                   nvmf_tcp_queue_id(tcp_queue), le64toh(cqe->result.u64), req, tag,
                   le16toh(cqe->sq_head), le16toh(cqe->sq_id), cqe->command_id,
