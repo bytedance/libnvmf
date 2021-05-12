@@ -484,7 +484,7 @@ static int nvmf_rdma_queue_buffer_setup(struct nvmf_rdma_queue *rdma_queue)
 		/* TODO */
 		log_error("queue[%d] ibv_reg_mr for data_mr failed, %m\n", queue->qid);
 	}
-	log_debug("queue[%d]data mr LKEY[%x], RKEY[%x], base %p, size %d(size %d * nmemb %d)\n",
+	log_debug("queue[%d]data mr LKEY[%x], RKEY[%x], base %p, size %lu(size %d * nmemb %d)\n",
                   queue->qid, rdma_queue->data_mr->lkey, rdma_queue->data_mr->rkey, addr, length,
                   buddy_size(rdma_queue->buddy), buddy_nmemb(rdma_queue->buddy));
 

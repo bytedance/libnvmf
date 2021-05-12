@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
 	unsigned long val = 0;
 	int i, h;
 
-	llist_init(&head);
+	llist_head_init(&head);
 	memset(contexts, 0x00, sizeof(contexts));
 
 	for (i = 0; i < WORKS; i++) {
