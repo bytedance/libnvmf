@@ -38,7 +38,7 @@ slab_t slab_create(const char *name, unsigned int size, unsigned int objects)
 
 	__slab = (struct slab_s *)calloc(1, sizeof(*__slab));
 	if (!__slab) {
-		goto fail;
+		return NULL;
 	}
 
 	bits = ALIGNUP(objects, BITS_OF_UL);
