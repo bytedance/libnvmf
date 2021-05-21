@@ -81,6 +81,7 @@ enum {
 };
 
 #define NVME_AQ_DEPTH		32
+
 #define NVME_NR_AEN_COMMANDS	1
 #define NVME_AQ_BLK_MQ_DEPTH	(NVME_AQ_DEPTH - NVME_NR_AEN_COMMANDS)
 

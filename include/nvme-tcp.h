@@ -14,8 +14,8 @@ enum nvme_tcp_pfv {
 
 enum nvme_tcp_fatal_error_status {
 	NVME_TCP_FES_INVALID_PDU_HDR		= 0x01,
-	NVME_TCP_FES_PDU_SEQ_ERR		= 0x02,
-	NVME_TCP_FES_HDR_DIGEST_ERR		= 0x03,
+	NVME_TCP_FES_PDU_SEQ_ERR		    = 0x02,
+	NVME_TCP_FES_HDR_DIGEST_ERR		    = 0x03,
 	NVME_TCP_FES_DATA_OUT_OF_RANGE		= 0x04,
 	NVME_TCP_FES_R2T_LIMIT_EXCEEDED		= 0x05,
 	NVME_TCP_FES_DATA_LIMIT_EXCEEDED	= 0x05,
@@ -29,13 +29,21 @@ enum nvme_tcp_digest_option {
 
 enum nvme_tcp_pdu_type {
 	nvme_tcp_icreq		= 0x0,
-	nvme_tcp_icresp		= 0x1,
-	nvme_tcp_h2c_term	= 0x2,
-	nvme_tcp_c2h_term	= 0x3,
-	nvme_tcp_cmd		= 0x4,
-	nvme_tcp_rsp		= 0x5,
-	nvme_tcp_h2c_data	= 0x6,
-	nvme_tcp_c2h_data	= 0x7,
+
+    nvme_tcp_icresp		= 0x1,
+
+    nvme_tcp_h2c_term	= 0x2,
+
+    nvme_tcp_c2h_term	= 0x3,
+
+    nvme_tcp_cmd		= 0x4,
+
+    nvme_tcp_rsp		= 0x5,
+
+    nvme_tcp_h2c_data	= 0x6,
+
+    nvme_tcp_c2h_data	= 0x7,
+
 	nvme_tcp_r2t		= 0x9,
 };
 

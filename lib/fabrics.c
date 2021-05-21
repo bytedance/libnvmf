@@ -42,13 +42,21 @@ static int nvmf_connect_admin_queue_req(struct nvmf_request *req, struct nvmf_qu
 	int ret = 0;
 
 	memset(cmd, 0, sizeof(*cmd));
+
+	/*
+	 * connect.cattr = 0,
+	 * 1. don't support deletion of individual I/O Queues
+	 * 2. SQ flow control shall not be disabled
+	 */
 	cmd->connect.opcode = nvme_fabrics_command;
 	cmd->connect.fctype = nvme_fabrics_type_connect;
 	cmd->connect.qid = 0;
 	cmd->connect.sqsize = htole16(NVME_AQ_DEPTH - 1);
 	cmd->connect.kato = htole32(ctrl->opts->kato + NVME_KATO_GRACE);
 
+
 	data->hostid = ctrl->opts->uuid;
+	/* Use dynamic controller model */
 	data->cntlid = htole16(0xffff);
 	strncpy(data->subsysnqn, ctrl->opts->trnqn, NVMF_NQN_SIZE);
 	strncpy(data->hostnqn, ctrl->opts->hostnqn, NVMF_NQN_SIZE);
