@@ -129,6 +129,7 @@ struct nvmf_queue_work {
 	int (*func)(void *arg);
 	void *arg;
 	int retval;
+	bool done;
 	pthread_cond_t wait;
 	pthread_mutex_t mutex;
 };
