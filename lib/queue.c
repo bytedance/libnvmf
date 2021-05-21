@@ -99,8 +99,9 @@ static int nvmf_queue_handle_event(struct nvmf_queue *queue, short event)
 		work->retval = work->func(work->arg);
 
 		pthread_mutex_lock(&work->mutex);
-		pthread_cond_signal(&work->wait);
+		work->done = true;
 		pthread_mutex_unlock(&work->mutex);
+        pthread_cond_signal(&work->wait);
 	}
 
 	return 0;
@@ -540,6 +541,7 @@ int nvmf_queue_call_function(struct nvmf_queue *queue, int (*func)(void *arg), v
 	work.func = func;
 	work.arg = arg;
 	work.retval = 0;
+	work.done = false;
 	pthread_cond_init(&work.wait, NULL);
 	pthread_mutex_init(&work.mutex, NULL);
 
@@ -548,7 +550,9 @@ int nvmf_queue_call_function(struct nvmf_queue *queue, int (*func)(void *arg), v
 	nvmf_queue_kick(queue);
 
 	pthread_mutex_lock(&work.mutex);
-	pthread_cond_wait(&work.wait, &work.mutex);
+	while (!work.done) {
+        pthread_cond_wait(&work.wait, &work.mutex);
+	}
 	pthread_mutex_unlock(&work.mutex);
 
 	return work.retval;
