@@ -59,7 +59,7 @@ void show_iov(char *tag, struct iovec *iov, int iovcnt)
 	printf("%s %s\n", tag, buf);
 }
 
-void statistics()
+void statistics(void)
 {
     static time_t prev;
     time_t current = time(NULL);
@@ -68,7 +68,6 @@ void statistics()
     }
 
     prev = current;
-    etatime++;
     if (etatime++ > 1) {
         printf("[%04d]IOPS %ld, BW %ld\n", etatime, iops, bw);
         iops = 0;
