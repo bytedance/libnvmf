@@ -14,7 +14,7 @@ static void log_to_stderr(int log_level, const char *message)
     fprintf(stderr, message);
 }
 
-const char *log_level_tag[] = {"FATAL", "ERROR", "WARN", "INFO", "DEBUG"};
+const char *log_level_tag[] = {"ERROR", "WARN", "DEBUG"};
 int g_log_level = LOG_LEVEL_ERROR;
 nvmf_log_fn g_log_fn = log_to_stderr;
 __thread char thread_name_buff[17] = {0};
@@ -22,7 +22,7 @@ __thread const char *thread_name = NULL;
 
 void set_log_level(int log_level)
 {
-    assert(log_level >= LOG_LEVEL_FATAL);
+    assert(log_level >= LOG_LEVEL_ERROR);
     assert(log_level <= LOG_LEVEL_DEBUG);
     g_log_level = log_level;
 }

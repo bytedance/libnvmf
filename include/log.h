@@ -13,11 +13,9 @@
 #include "types.h"
 #include "nvmf.h"
 
-#define LOG_LEVEL_DEBUG 4
-#define LOG_LEVEL_INFO 3
-#define LOG_LEVEL_WARN 2
-#define LOG_LEVEL_ERROR 1
-#define LOG_LEVEL_FATAL 0
+#define LOG_LEVEL_DEBUG 2
+#define LOG_LEVEL_WARN 1
+#define LOG_LEVEL_ERROR 0
 
 #define MAX_LOG_BUFFER 2048
 
@@ -41,18 +39,14 @@ do {                                            \
            log_level_tag[level], __FILE__, __LINE__, ##args);  \
     } while (0)
 
-#define log_fatal(fmt, args...)   log_impl(LOG_LEVEL_FATAL, fmt, ##args)
-
 #define log_error(fmt, args...)    log_impl(LOG_LEVEL_ERROR, fmt, ##args)
 
 #define log_warn(fmt, args...)    log_impl(LOG_LEVEL_WARN, fmt, ##args)
 
-#define log_info(fmt, args...)   log_impl(LOG_LEVEL_INFO, fmt, ##args)
-
 #ifdef DEBUG
 #define log_debug(fmt, args...)    log_impl(LOG_LEVEL_DEBUG, fmt, ##args)
 
-#define log_trace()        log_debug("\n")
+#define log_trace()        log_debug("TRACE %s\n", __func__)
 #else
 #define log_debug(fmt, args...)    do {} while (0)
 
