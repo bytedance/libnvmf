@@ -20,7 +20,7 @@ CFLAGS += -g -O2 -fno-strict-aliasing
 CFLAGS += -Wall -Wstrict-prototypes -Werror -fPIC -Wno-format-truncation -Wno-unused-result
 
 LIBS = -lpthread
-OBJS = ctrl.o transport.o transport-tcp.o fabrics.o event.o queue.o options.o utils.o slab.o buddy.o
+OBJS = ctrl.o transport.o transport-tcp.o fabrics.o event.o queue.o options.o utils.o slab.o buddy.o log.o
 
 ifneq ($(USE_RDMA),)
 OBJS += transport-rdma.o
