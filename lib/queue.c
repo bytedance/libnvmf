@@ -413,7 +413,9 @@ static void nvmf_queue_pollfds(struct nvmf_queue *queue)
 	nvmf_queue_state_set(queue, QUEUE_STATE_IDLE);
 	ret = poll(pfds, nr_pfds, TICK);
 	if (ret < 0) {
-		log_error("queue[%d] poll error", queue->qid);
+		assert(errno == EINTR);
+		log_error("queue[%d] poll error: %m", queue->qid);
+		return;
 	}
 
 	/* let's run! */
