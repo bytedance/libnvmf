@@ -10,27 +10,53 @@
 #include <stdio.h>
 #include <time.h>
 
-#define log_impl(tag, fmt, args...)						\
-	do {									\
-		time_t t = time(NULL);						\
-		char name[17] = {0};						\
-		pthread_getname_np(pthread_self(), name, sizeof(name) - 1);	\
-		fprintf(stdout, "%16s %24.24s[%s]%s %d " fmt, name, ctime(&t),	\
-				tag, __func__, __LINE__, ##args);		\
-	} while (0)
+#include "types.h"
+#include "nvmf.h"
 
-#define log_error(fmt, args...)	log_impl("error", fmt, ##args)
+#define LOG_LEVEL_DEBUG 4
+#define LOG_LEVEL_INFO 3
+#define LOG_LEVEL_WARN 2
+#define LOG_LEVEL_ERROR 1
+#define LOG_LEVEL_FATAL 0
 
-#define log_warn(fmt, args...)	log_impl("warn", fmt, ##args)
+#define MAX_LOG_BUFFER 2048
+
+extern nvmf_log_fn g_log_fn;
+extern int g_log_level;
+extern const char *log_level_tag[5];
+
+extern __thread char thread_name_buff[17];
+extern __thread const char *thread_name;
+
+void nvmf_log_message(int log_level, const char *fmt, ...);
+
+#define log_impl(level, fmt, args...) \
+do {                                            \
+        time_t t = time(NULL);                        \
+        if (unlikely(!thread_name)) {                  \
+            pthread_getname_np(pthread_self(), thread_name_buff, sizeof(thread_name_buff)); \
+            thread_name = thread_name_buff;         \
+        }                                              \
+        nvmf_log_message(level, "%16s %24.24s %s %s:%d] " fmt, thread_name, ctime(&t),       \
+           log_level_tag[level], __FILE__, __LINE__, ##args);  \
+    } while (0)
+
+#define log_fatal(fmt, args...)   log_impl(LOG_LEVEL_FATAL, fmt, ##args)
+
+#define log_error(fmt, args...)    log_impl(LOG_LEVEL_ERROR, fmt, ##args)
+
+#define log_warn(fmt, args...)    log_impl(LOG_LEVEL_WARN, fmt, ##args)
+
+#define log_info(fmt, args...)   log_impl(LOG_LEVEL_INFO, fmt, ##args)
 
 #ifdef DEBUG
-#define log_debug(fmt, args...)	log_impl("debug", fmt, ##args)
+#define log_debug(fmt, args...)    log_impl(LOG_LEVEL_DEBUG, fmt, ##args)
 
-#define log_trace()		log_impl("trace", "\n")
+#define log_trace()        log_debug("\n")
 #else
-#define log_debug(fmt, args...)	do {} while (0)
+#define log_debug(fmt, args...)    do {} while (0)
 
-#define log_trace()		do {} while (0)
+#define log_trace()        do {} while (0)
 #endif
 
-#endif	/* _LIBNVMF_LOG_ */
+#endif    /* _LIBNVMF_LOG_ */
