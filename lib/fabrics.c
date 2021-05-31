@@ -957,17 +957,19 @@ static void nvmf_ns_discard_cb(struct nvmf_request *req, void *opaque)
 {
 	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_completion *cqe = req->cqe;
-	struct iovec *dsmiovec;
+	struct iovec *dsmiovec = (struct iovec *)opaque;
+	struct nvme_dsm_range *range = (struct nvme_dsm_range *)dsmiovec->iov_base;
 
 	log_trace();
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("queue[%d]tag[0x%x], rw error, status 0x%x\n", req->queue->qid, req->tag,
-                          le16toh(cqe->status));
+		log_error("discard failed, queue[%d]tag[0x%x], discard error, status 0x%x, lba"
+			  "[%lu, %u]\n", req->queue->qid, req->tag, le16toh(cqe->status),
+			  le64toh(range->slba), le32toh(range->nlb));
 	} else {
-		log_debug("queue[%d]tag[0x%x], discard succeed\n", req->queue->qid, req->tag);
+		log_debug("discard succeed, queue[%d]tag[0x%x], discard succeed, lba[%lu, %u]\n",
+			  req->queue->qid, req->tag, le64toh(range->slba), le32toh(range->nlb));
 	}
 
-	dsmiovec = (struct iovec *)opaque;
 	nvmf_free(dsmiovec->iov_base);
 	nvmf_free(dsmiovec);
 
@@ -986,6 +988,7 @@ static nvmf_req_t nvmf_ns_discard_async(struct nvmf_queue *queue, struct iovec *
 	struct iovec *dsmiovec, *useriovec;
 	struct nvme_dsm_range *range;
 	off_t _offset = offset;
+	int lbads = ctrl->ns->lbads;
 	int i;
 
 	log_trace();
@@ -1002,8 +1005,8 @@ static nvmf_req_t nvmf_ns_discard_async(struct nvmf_queue *queue, struct iovec *
 		range = (struct nvme_dsm_range *)dsmiovec->iov_base + i;
 
 		range->cattr = htole32(0);
-		range->nlb = htole32(useriovec->iov_len >> NVMF_SECTOR_SHIFT);
-		range->slba = htole64(_offset >> NVMF_SECTOR_SHIFT);
+		range->nlb = htole32(useriovec->iov_len >> lbads);
+		range->slba = htole64(_offset >> lbads);
 
 		_offset += useriovec->iov_len;
 	}
@@ -1050,15 +1053,16 @@ static int nvmf_ns_writezeroes_req(struct nvmf_request *req, off_t offset, size_
 	struct nvme_command *cmd = req->cmd;
 	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_ns *ns = ctrl->ns;
+	int lbads = ctrl->ns->lbads;
 	int ret = 0;
 
 	log_trace();
 	memset(cmd, 0, sizeof(*cmd));
-        cmd->write_zeroes.opcode = nvme_cmd_write_zeroes;
-        cmd->write_zeroes.nsid = htole32(ns->nsid);
-        cmd->write_zeroes.slba = htole64(offset >> NVMF_SECTOR_SHIFT);
-        cmd->write_zeroes.length = htole16((length >> NVMF_SECTOR_SHIFT) - 1);
-        cmd->write_zeroes.control = 0;
+	cmd->write_zeroes.opcode = nvme_cmd_write_zeroes;
+	cmd->write_zeroes.nsid = htole32(ns->nsid);
+	cmd->write_zeroes.slba = htole64(offset >> lbads);
+	cmd->write_zeroes.length = htole16((length >> lbads) - 1);
+	cmd->write_zeroes.control = 0;
 
 	return ret;
 }
