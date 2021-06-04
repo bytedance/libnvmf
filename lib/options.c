@@ -12,6 +12,7 @@
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -127,7 +128,26 @@ out:
 	return ret;
 }
 
-nvmf_ctrl_t nvmf_default_options(const char *uri)
+static inline void set_err_msg(char **err_msg, const char *fmt, ...)
+{
+	char *err_buf;
+
+	if (!err_msg) {
+		return;
+	}
+	err_buf = (char *)nvmf_calloc(sizeof(char), MAX_LOG_BUFFER);
+	if (!err_buf) {
+		return;
+	}
+	va_list ap;
+	va_start(ap, fmt);
+	vsnprintf(err_buf, MAX_LOG_BUFFER, fmt, ap);
+	va_end(ap);
+
+	*err_msg = err_buf;
+}
+
+nvmf_ctrl_t nvmf_default_options(const char *uri, char** err_msg)
 {
 	struct nvmf_ctrl_options *options;
 	char reason[256];
@@ -136,9 +156,11 @@ nvmf_ctrl_t nvmf_default_options(const char *uri)
 
 	nvmf_malloc_init();
 
-	options = (struct nvmf_ctrl_options *)nvmf_calloc(1, sizeof(*options));
+	options = (struct nvmf_ctrl_options *)calloc(1, sizeof(*options));
+	options->log_fn = nvmf_default_log_fn;
+	options->log_level = DEFAULT_LOG_LEVEL;
 	if (nvmf_parse_uri(uri, options, reason)) {
-		log_error("nvmf_parse_uri fail, reason %s\n", reason);
+		set_err_msg(err_msg, "nvmf_parse_uri fail, reason %s\n", reason);
 		nvmf_free(options);
 		return NULL;
 	}
@@ -152,16 +174,13 @@ nvmf_ctrl_t nvmf_default_options(const char *uri)
 	if (!options->hostnqn) {
 		options->hostnqn = nvmf_calloc(1, NVMF_NQN_SIZE);
 		snprintf(options->hostnqn, NVMF_NQN_SIZE, "nqn.2014-08.org.nvmexpress:libnvmf:"
-                         "uuid:%x%x%x%x-%x%x-%x%x-%x%x-%x%x%x%x%x%x", b[0], b[1], b[2], b[3], b[4],
-                          b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+		         "uuid:%x%x%x%x-%x%x-%x%x-%x%x-%x%x%x%x%x%x", b[0], b[1], b[2], b[3], b[4],
+		         b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
 	}
 
 	options->kato = NVME_DEFAULT_KATO;
 	options->nr_queues = NVMF_DEF_IO_QUEUES + 1;
 	options->qsize = NVMF_DEF_QUEUE_SIZE;
-
-	log_debug("nvmf_parse_uri %s %s %s %s %d\n", options->transport, options->traddr,
-                  options->trsvcid, options->trnqn, options->nsid);
 
 	return options;
 }

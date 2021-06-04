@@ -30,7 +30,7 @@ int nvmf_ctrl_do_req(struct nvmf_request *req)
 
 		ret = poll(&pfd, 1, req->timeout ? timeout : 1000);
 		if (ret < 0) {
-			log_error("poll queues error");
+			log_error(ctrl, "poll queues error");
 			return -errno;
 		}
 

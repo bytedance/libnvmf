@@ -17,40 +17,48 @@
 #define LOG_LEVEL_WARN 1
 #define LOG_LEVEL_ERROR 0
 
-#define MAX_LOG_BUFFER 2048
+#define MAX_LOG_BUFFER 1024
 
-extern nvmf_log_fn g_log_fn;
-extern int g_log_level;
-extern const char *log_level_tag[5];
+extern const char *log_level_tag[];
 
 extern __thread char thread_name_buff[17];
 extern __thread const char *thread_name;
 
-void nvmf_log_message(int log_level, const char *fmt, ...);
+void nvmf_log_message(nvmf_ctrl_t ctrl, int log_level, const char *fmt, ...);
+void nvmf_default_log_fn(int log_level, const char *message);
 
-#define log_impl(level, fmt, args...) \
+
+#define log_impl(ctrl, level, fmt, args...) \
 do {                                            \
         time_t t = time(NULL);                        \
         if (unlikely(!thread_name)) {                  \
             pthread_getname_np(pthread_self(), thread_name_buff, sizeof(thread_name_buff)); \
             thread_name = thread_name_buff;         \
         }                                              \
-        nvmf_log_message(level, "%16s %24.24s %s %s:%d] " fmt, thread_name, ctime(&t),       \
+        nvmf_log_message(ctrl, level, "%16s %24.24s %s %s:%d] " fmt, thread_name, ctime(&t),   \
            log_level_tag[level], __FILE__, __LINE__, ##args);  \
     } while (0)
 
-#define log_error(fmt, args...)    log_impl(LOG_LEVEL_ERROR, fmt, ##args)
+#define log_error(ctrl, fmt, args...)    log_impl(ctrl, LOG_LEVEL_ERROR, fmt, ##args)
 
-#define log_warn(fmt, args...)    log_impl(LOG_LEVEL_WARN, fmt, ##args)
+#define log_warn(ctrl, fmt, args...)    log_impl(ctrl, LOG_LEVEL_WARN, fmt, ##args)
 
 #ifdef DEBUG
-#define log_debug(fmt, args...)    log_impl(LOG_LEVEL_DEBUG, fmt, ##args)
+#define DEFAULT_LOG_LEVEL LOG_LEVEL_DEBUG
+#define log_debug(ctrl, fmt, args...)    log_impl(ctrl, LOG_LEVEL_DEBUG, fmt, ##args)
 
-#define log_trace()        log_debug("TRACE %s\n", __func__)
+#define log_trace(ctrl)        log_debug(ctrl, "TRACE %s\n", __func__)
 #else
-#define log_debug(fmt, args...)    do {} while (0)
+#define DEFAULT_LOG_LEVEL LOG_LEVEL_ERROR
+#define log_debug(ctrl, fmt, args...)   \
+do {                                    \
+    (void)ctrl;                         \
+} while (0)
 
-#define log_trace()        do {} while (0)
+#define log_trace(ctrl)     \
+do {                        \
+    (void)ctrl;             \
+} while (0)
 #endif
 
 #endif    /* _LIBNVMF_LOG_ */

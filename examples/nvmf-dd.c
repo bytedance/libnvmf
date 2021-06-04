@@ -111,6 +111,7 @@ int main(int argc, char *argv[])
 	nvmf_ctrl_t src_ctrl;
 	nvmf_options_t src_options;
 	char *src_uri = "tcp://192.168.122.33:4420/nvmet-always/1";
+	char *err_msg = NULL;
 	int dst_fd;
 
 	if (argc != 3) {
@@ -118,8 +119,10 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	src_options = nvmf_default_options(src_uri);
+	src_options = nvmf_default_options(src_uri, &err_msg);
 	if (!src_options) {
+	    printf("%s", err_msg);
+	    free(err_msg);
 		return -1;
 	}
 

@@ -10,6 +10,7 @@
 #include "list.h"
 #include "llist.h"
 #include "nvme.h"
+#include "nvmf.h"
 #include "slab.h"
 #include "utils.h"
 
@@ -47,6 +48,9 @@ struct nvmf_ctrl_options {
 
 	bool hdr_digest;
 	bool data_digest;
+
+	nvmf_log_fn log_fn;
+	int log_level;
 };
 
 typedef void *nvmf_transport_ctrl_t;

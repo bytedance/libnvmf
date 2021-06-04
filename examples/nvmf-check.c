@@ -186,6 +186,7 @@ int main(int argc, char *argv[])
 	nvmf_ctrl_t nvmf_ctrl;
 	nvmf_options_t options;
 	char *uri;
+    char *err_msg = NULL;
 	unsigned int mdts;
 	struct sigaction sa;
 
@@ -195,8 +196,10 @@ int main(int argc, char *argv[])
 	}
 
 	uri = argv[1];
-	options = nvmf_default_options(uri);
+	options = nvmf_default_options(uri, &err_msg);
 	if (!options) {
+	    printf("%s", err_msg);
+	    free(err_msg);
 		return -1;
 	}
 

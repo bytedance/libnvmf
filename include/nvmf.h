@@ -14,13 +14,17 @@ typedef void *nvmf_req_t;
 typedef void(*nvmf_log_fn) (int log_level, const char*);
 
 /* options API */
-nvmf_options_t nvmf_default_options(const char *uri);
+nvmf_options_t nvmf_default_options(const char *uri, char **err_msg);
 
-void nvmf_options_free(nvmf_options_t options);
+void nvmf_options_free(nvmf_options_t opts);
 
 void nvmf_options_set_kato(nvmf_options_t opts, unsigned int milliseconds);
 
 void nvmf_options_set_io_queues(nvmf_options_t opts, unsigned int io_queues);
+
+void nvmf_options_set_log_level(nvmf_options_t opts, int level);
+
+void nvmf_options_set_log_fn(nvmf_options_t opts, nvmf_log_fn fn);
 
 
 /* ctrl API */
@@ -84,10 +88,5 @@ int nvmf_req_free(nvmf_req_t req);
 int nvmf_queue_depth(nvmf_ctrl_t ctrl, unsigned int qid);
 
 int nvmf_queue_nr_inflight(nvmf_ctrl_t ctrl, unsigned int qid);
-
-/* log API */
-void nvmf_set_log_level(int level);
-
-void nvmf_set_log_fn(nvmf_log_fn fn);
 
 #endif /* _LIBNVMF_NVMF_ */
