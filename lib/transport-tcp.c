@@ -24,14 +24,14 @@
 #include <assert.h>
 
 /* defined in section "PDU Header and Data Digests" */
-#define FIELD_HEADER	0
-#define FIELD_HDGST	1
-#define FIELD_CPDA	2
-#define FIELD_DDGST	3
+#define FIELD_HEADER    0
+#define FIELD_HDGST    1
+#define FIELD_CPDA    2
+#define FIELD_DDGST    3
 
-#define FIELD_FIXED	4
+#define FIELD_FIXED    4
 
-#define QUEUE_MAX_IOV	(NVMF_MAX_IOV + FIELD_FIXED)
+#define QUEUE_MAX_IOV    (NVMF_MAX_IOV + FIELD_FIXED)
 
 struct nvmf_tcp_queue {
 	struct nvmf_queue *queue;
@@ -42,8 +42,8 @@ struct nvmf_tcp_queue {
 	bool hdr_digest;
 	bool data_digest;
 
-	__u8 hpda;	/* TODO, not support currently */
-	__u8 cpda;	/* TODO, not support currently */
+	__u8 hpda;    /* TODO, not support currently */
+	__u8 cpda;    /* TODO, not support currently */
 	char pad[64];
 
 	/* slab for nvmf_tcp_priv */
@@ -112,7 +112,7 @@ static inline int nvmf_tcp_queue_id(struct nvmf_tcp_queue *tcp_queue)
 	return tcp_queue->queue->qid;
 }
 
-static inline void nvmf_tcp_iovs_dump(struct iovec *iovs, int iovcnt)
+static inline void nvmf_tcp_iovs_dump(struct nvmf_ctrl *ctrl, struct iovec *iovs, int iovcnt)
 {
 	struct iovec *iov;
 	int i, ret, size = iovcnt * 64;
@@ -125,34 +125,35 @@ static inline void nvmf_tcp_iovs_dump(struct iovec *iovs, int iovcnt)
 		p += ret;
 	}
 
-	log_error("iovcnt[%d] %s\n", iovcnt, buf);
+	log_error(ctrl, "iovcnt[%d] %s\n", iovcnt, buf);
 	nvmf_free(buf);
 }
 
-static inline void nvmf_tcp_queue_dump(struct nvmf_tcp_queue *tcp_queue)
+static inline void nvmf_tcp_queue_dump(struct nvmf_ctrl *ctrl, struct nvmf_tcp_queue *tcp_queue)
 {
-	log_error("queue[%d], sockfd %d, size %d, cmnd_capsule_len %ld\n",
-                  tcp_queue->queue->qid, tcp_queue->sockfd, tcp_queue->queue->qsize,
-                  tcp_queue->cmnd_capsule_len);
+	log_error(ctrl, "queue[%d], sockfd %d, size %d, cmnd_capsule_len %ld\n",
+              tcp_queue->queue->qid, tcp_queue->sockfd, tcp_queue->queue->qsize,
+              tcp_queue->cmnd_capsule_len);
 
 	if (tcp_queue->i_req) {
-		log_error("\t input req %p, iovcnt %d, totalsize %ld, rwsize %ld\n",
-                          tcp_queue->i_req, tcp_queue->i_iovcnt, tcp_queue->i_totalsize,
-                          tcp_queue->i_rwsize);
-		nvmf_tcp_iovs_dump(tcp_queue->i_iovs, tcp_queue->i_iovcnt);
+		log_error(ctrl, "\t input req %p, iovcnt %d, totalsize %ld, rwsize %ld\n",
+		          tcp_queue->i_req, tcp_queue->i_iovcnt, tcp_queue->i_totalsize,
+		          tcp_queue->i_rwsize);
+		nvmf_tcp_iovs_dump(ctrl, tcp_queue->i_iovs, tcp_queue->i_iovcnt);
 	}
 
 	if (tcp_queue->o_req) {
-		log_error("\toutput req %p, iovcnt %d, totalsize %ld, rwsize %ld\n",
-                          tcp_queue->o_req, tcp_queue->o_iovcnt, tcp_queue->o_totalsize,
-                          tcp_queue->o_rwsize);
-		nvmf_tcp_iovs_dump(tcp_queue->o_iovs, tcp_queue->o_iovcnt);
+		log_error(ctrl, "\toutput req %p, iovcnt %d, totalsize %ld, rwsize %ld\n",
+		          tcp_queue->o_req, tcp_queue->o_iovcnt, tcp_queue->o_totalsize,
+		          tcp_queue->o_rwsize);
+		nvmf_tcp_iovs_dump(ctrl, tcp_queue->o_iovs, tcp_queue->o_iovcnt);
 	}
 }
 
 /* send ICReq & recv ICResp */
 static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	int ret;
 	struct nvme_tcp_icreq_pdu icreq = {0};
 	struct nvme_tcp_icresp_pdu icresp = {0};
@@ -176,58 +177,59 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 
 	ret = send(tcp_queue->sockfd, &icreq, sizeof(icreq), 0);
 	if (ret < 0) {
-		log_error("send icreq error, %m");
+		log_error(ctrl, "send icreq error, %m");
 		return ret;
 	} else if (ret != sizeof(icreq)) {
-	    log_error("send icreq error, %m");
-	    return ret;
+		log_error(ctrl, "send icreq error, %m");
+		return ret;
 	}
 
 	ret = recv(tcp_queue->sockfd, &icresp, sizeof(icresp), 0);
 	if (ret < 0) {
-		log_error("recv icresp error, queue[%d]: %m", nvmf_tcp_queue_id(tcp_queue));
+		log_error(ctrl, "recv icresp error, queue[%d]: %m", nvmf_tcp_queue_id(tcp_queue));
 		return ret;
 	} else if (ret != sizeof(icresp)) {
-		log_error("recv icresp error, queue %d: real len(%d) != expected(%d)",
-                          nvmf_tcp_queue_id(tcp_queue), ret, (int)sizeof(icreq));
+		log_error(ctrl, "recv icresp error, queue %d: real len(%d) != expected(%d)",
+		          nvmf_tcp_queue_id(tcp_queue), ret, (int)sizeof(icreq));
 		return -EINVAL;
 	}
 
 	if (icresp.hdr.type != nvme_tcp_icresp) {
-		log_error("type error, queue %d: %d\n", nvmf_tcp_queue_id(tcp_queue),
-                          icresp.hdr.type);
+		log_error(ctrl, "type error, queue %d: %d\n", nvmf_tcp_queue_id(tcp_queue),
+                  icresp.hdr.type);
 		return -EINVAL;
 	}
 
 	if (le32toh(icresp.hdr.plen) != sizeof(icresp)) {
-		log_error("length error, queue %d: %d\n", nvmf_tcp_queue_id(tcp_queue),
-                          icresp.hdr.plen);
+		log_error(ctrl, "length error, queue %d: %d\n", nvmf_tcp_queue_id(tcp_queue),
+		          icresp.hdr.plen);
 		return -EINVAL;
 	}
 
 	if (icresp.pfv != NVME_TCP_PFV_1_0) {
-		log_error("pfv error, queue %d: %d\n", nvmf_tcp_queue_id(tcp_queue), icresp.pfv);
+		log_error(ctrl, "pfv error, queue %d: %d\n", nvmf_tcp_queue_id(tcp_queue),
+		          icresp.pfv);
 		return -EINVAL;
 	}
 
 	data_digest = !!(icresp.digest & NVME_TCP_DATA_DIGEST_ENABLE);
 	if (tcp_queue->data_digest != data_digest) {
-		log_error("data digest error, queue %d: local: %c target: %c\n",
+		log_error(ctrl, "data digest error, queue %d: local: %c target: %c\n",
 				nvmf_tcp_queue_id(tcp_queue), tcp_queue->data_digest, data_digest);
 		return -EINVAL;
 	}
 
 	hdr_digest = !!(icresp.digest & NVME_TCP_HDR_DIGEST_ENABLE);
 	if (tcp_queue->hdr_digest != hdr_digest) {
-		log_error("header digest error, queue %d: local: %c target: %c\n",
-                          nvmf_tcp_queue_id(tcp_queue), tcp_queue->data_digest, data_digest);
+		log_error(ctrl, "header digest error, queue %d: local: %c target: %c\n",
+		          nvmf_tcp_queue_id(tcp_queue), tcp_queue->data_digest, data_digest);
 		return -EINVAL;
 	}
 
 	/* TODO support cpda */
 	if (icresp.cpda != 0) {
-		log_error("cpda error, queue %d, cpda %d\n", nvmf_tcp_queue_id(tcp_queue),
-                          icresp.cpda);
+		log_error(ctrl, "cpda error, queue %d, cpda %d\n", nvmf_tcp_queue_id(tcp_queue),
+		          icresp.cpda);
 		return -EINVAL;
 	}
 
@@ -239,6 +241,7 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 static int nvmf_tcp_init_socket(struct nvmf_tcp_queue *tcp_queue)
 {
 	struct nvmf_queue *queue = tcp_queue->queue;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_ctrl_options *opts;
 	struct sockaddr_in taddr;
 	struct linger so_linger = { .l_onoff = 1, .l_linger = 1 };
@@ -246,7 +249,7 @@ static int nvmf_tcp_init_socket(struct nvmf_tcp_queue *tcp_queue)
 
 	ret = socket(AF_INET, SOCK_STREAM, 0);
 	if (ret < 0) {
-		log_error("socket error\n");
+		log_error(ctrl, "socket error\n");
 		return ret;
 	}
 
@@ -255,7 +258,7 @@ static int nvmf_tcp_init_socket(struct nvmf_tcp_queue *tcp_queue)
 	opt = 6;
 	ret = setsockopt(tcp_queue->sockfd, SOL_TCP, TCP_SYNCNT, &opt, sizeof(opt));
 	if (ret < 0) {
-		log_error("setsockopt TCP_SYNCNT error\n");
+		log_error(ctrl, "setsockopt TCP_SYNCNT error\n");
 		goto closefd;
 	}
 
@@ -263,7 +266,7 @@ static int nvmf_tcp_init_socket(struct nvmf_tcp_queue *tcp_queue)
 	ret = setsockopt(tcp_queue->sockfd, SOL_TCP, TCP_NODELAY, &opt,
 			sizeof(opt));
 	if (ret < 0) {
-		log_error("setsockopt TCP_SYNCNT error\n");
+		log_error(ctrl, "setsockopt TCP_SYNCNT error\n");
 		goto closefd;
 	}
 
@@ -271,7 +274,7 @@ static int nvmf_tcp_init_socket(struct nvmf_tcp_queue *tcp_queue)
 	ret = setsockopt(tcp_queue->sockfd, SOL_SOCKET, SO_LINGER, &so_linger,
 			sizeof(so_linger));
 	if (ret < 0) {
-		log_error("setsockopt SO_LINGER error\n");
+		log_error(ctrl, "setsockopt SO_LINGER error\n");
 		goto closefd;
 	}
 
@@ -281,7 +284,7 @@ static int nvmf_tcp_init_socket(struct nvmf_tcp_queue *tcp_queue)
 	taddr.sin_port = htons(atoi((opts->trsvcid)));
 	ret = connect(tcp_queue->sockfd, &taddr, sizeof(taddr));
 	if (ret < 0) {
-		log_error("socket connect error\n");
+		log_error(ctrl, "socket connect error\n");
 		goto closefd;
 	}
 
@@ -295,10 +298,11 @@ closefd:
 
 static int nvmf_tcp_create_queue(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_tcp_queue *tcp_queue;
 	int ret, qsize;
 
-	log_trace();
+	log_trace(ctrl);
 	tcp_queue = nvmf_calloc(1, sizeof(*tcp_queue));
 	if (!tcp_queue) {
 		return -ENOMEM;
@@ -340,7 +344,7 @@ static int nvmf_tcp_create_queue(struct nvmf_queue *queue)
 	nvmf_set_nonblock(tcp_queue->sockfd);
 
 	nvmf_queue_set_event(queue, tcp_queue->sockfd, nvmf_tcp_ctrl_process_queue,
-                             nvmf_tcp_ctrl_process_queue);
+	                     nvmf_tcp_ctrl_process_queue);
 	return ret;
 
 closefd:
@@ -360,10 +364,11 @@ free_queue:
 
 static int nvmf_tcp_release_queue(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_tcp_queue *tcp_queue = (struct nvmf_tcp_queue *)queue->priv;
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 
 	nvmf_queue_set_event(queue, tcp_queue->sockfd, NULL, NULL);
 	slab_destroy(tcp_queue->slab_priv);
@@ -376,10 +381,11 @@ static int nvmf_tcp_release_queue(struct nvmf_queue *queue)
 
 static int nvmf_tcp_restart_queue(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_tcp_queue *tcp_queue = (struct nvmf_tcp_queue *)queue->priv;
 	int ret;
 
-	log_debug("queue[%d]restart tcp queue\n", queue->qid);
+	log_debug(ctrl, "queue[%d]restart tcp queue\n", queue->qid);
 
 	nvmf_queue_set_event(queue, tcp_queue->sockfd, NULL, NULL);
 
@@ -400,7 +406,7 @@ static int nvmf_tcp_restart_queue(struct nvmf_queue *queue)
 	nvmf_set_nonblock(tcp_queue->sockfd);
 
 	nvmf_queue_set_event(queue, tcp_queue->sockfd, nvmf_tcp_ctrl_process_queue,
-                             nvmf_tcp_ctrl_process_queue);
+	                     nvmf_tcp_ctrl_process_queue);
 
 	return 0;
 
@@ -463,7 +469,7 @@ static inline void nvmf_tcp_queue_clear_output(struct nvmf_tcp_queue *queue)
 	memset(queue->o_iovs, 0x00, sizeof(queue->o_iovs));
 }
 
-static inline void nvme_tcp_set_sg_null(struct nvme_command *cmd)
+static inline void nvme_tcp_set_sg_null(struct nvmf_ctrl *ctrl, struct nvme_command *cmd)
 {
 	struct nvme_sgl_desc *sg = &cmd->common.dptr.sgl;
 
@@ -471,11 +477,12 @@ static inline void nvme_tcp_set_sg_null(struct nvme_command *cmd)
 	sg->length = 0;
 	sg->type = (NVME_TRANSPORT_SGL_DATA_DESC << 4) | NVME_SGL_FMT_TRANSPORT_A;
 
-	log_debug("cmd = 0x%x, length = %d\n", cmd->common.opcode, sg->length);
+	log_debug(ctrl, "cmd = 0x%x, length = %d\n", cmd->common.opcode, sg->length);
 }
 
-static inline void nvme_tcp_set_sg_incapsule(struct nvmf_tcp_queue *tcp_queue,
-		struct nvme_command *cmd, __u32 bufflen)
+static inline void nvme_tcp_set_sg_incapsule(struct nvmf_ctrl *ctrl,
+                                             struct nvmf_tcp_queue *tcp_queue,
+                                             struct nvme_command *cmd, __u32 bufflen)
 {
 	struct nvme_sgl_desc *sg = &cmd->common.dptr.sgl;
 
@@ -483,11 +490,12 @@ static inline void nvme_tcp_set_sg_incapsule(struct nvmf_tcp_queue *tcp_queue,
 	sg->length = htole32(bufflen);
 	sg->type = (NVME_SGL_FMT_DATA_DESC << 4) | NVME_SGL_FMT_OFFSET;
 
-	log_debug("cmd = 0x%x, addr = 0x%llx, length = %d\n", cmd->common.opcode, sg->addr,
-                  le32toh(sg->length));
+	log_debug(ctrl, "cmd = 0x%x, addr = 0x%llx, length = %d\n", cmd->common.opcode, sg->addr,
+				  le32toh(sg->length));
 }
 
-static inline void nvme_tcp_set_sg_host_data(struct nvme_command *cmd,
+static inline void nvme_tcp_set_sg_host_data(struct nvmf_ctrl *ctrl,
+		struct nvme_command *cmd,
 		__u32 bufflen)
 {
 	struct nvme_sgl_desc *sg = &cmd->common.dptr.sgl;
@@ -496,11 +504,12 @@ static inline void nvme_tcp_set_sg_host_data(struct nvme_command *cmd,
 	sg->length = htole32(bufflen);
 	sg->type = (NVME_TRANSPORT_SGL_DATA_DESC << 4) | NVME_SGL_FMT_TRANSPORT_A;
 
-	log_debug("cmd = 0x%x, length = %d\n", cmd->common.opcode, le32toh(sg->length));
+	log_debug(ctrl, "cmd = 0x%x, length = %d\n", cmd->common.opcode, le32toh(sg->length));
 }
 
 static inline int nvmf_tcp_map_data(struct nvmf_request *req, struct nvmf_tcp_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_command *cmd = req->cmd;
 	__u32 data_len = nvmf_tcp_iov_datalen(req);
 	bool is_write = nvme_is_write(cmd);
@@ -508,11 +517,11 @@ static inline int nvmf_tcp_map_data(struct nvmf_request *req, struct nvmf_tcp_qu
 	cmd->common.flags |= NVME_CMD_SGL_METABUF;
 
 	if (!data_len) {
-		nvme_tcp_set_sg_null(cmd);
+		nvme_tcp_set_sg_null(ctrl, cmd);
 	} else if (is_write && data_len <= nvme_tcp_incapsule_size(queue)) {
-		nvme_tcp_set_sg_incapsule(queue, cmd, data_len);
+		nvme_tcp_set_sg_incapsule(ctrl, queue, cmd, data_len);
 	} else {
-		nvme_tcp_set_sg_host_data(cmd, data_len);
+		nvme_tcp_set_sg_host_data(ctrl, cmd, data_len);
 	}
 
 	return 0;
@@ -588,6 +597,7 @@ static int nvmf_tcp_build_req(struct nvmf_request *req)
 
 static int nvmf_tcp_queue_send(struct nvmf_tcp_queue *tcp_queue)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvmf_tcp_priv *priv;
 	struct iovec iovs[QUEUE_MAX_IOV];
 	struct iovec *iov = NULL, *o_iov;
@@ -625,17 +635,17 @@ static int nvmf_tcp_queue_send(struct nvmf_tcp_queue *tcp_queue)
 				return 0;
 			}
 
-			log_error("queue[%d] req[%p] tag[0x%x]writev tcp cmd error, %m\n",
-                                  tcp_queue->queue->qid, tcp_queue->o_req, tcp_queue->o_req->tag);
-			nvmf_tcp_queue_dump(tcp_queue);
+			log_error(ctrl, "queue[%d] req[%p] tag[0x%x]writev tcp cmd error, %m\n",
+			          tcp_queue->queue->qid, tcp_queue->o_req, tcp_queue->o_req->tag);
+			nvmf_tcp_queue_dump(ctrl, tcp_queue);
 			return -errno;
 		}
 
 		tcp_queue->o_rwsize += ret;
-		log_debug("queue[%d] req[%p] tag[0x%x]sending pdu %ld bytes: total[%ld] - "
-                          "sent[%ld] = remained[%ld]\n", tcp_queue->queue->qid, tcp_queue->o_req,
-                          tcp_queue->o_req->tag, ret, tcp_queue->o_totalsize, tcp_queue->o_rwsize,
-                          tcp_queue->o_totalsize - tcp_queue->o_rwsize);
+		log_debug(ctrl, "queue[%d] req[%p] tag[0x%x]sending pdu %ld bytes: total[%ld] - "
+		          "sent[%ld] = remained[%ld]\n", tcp_queue->queue->qid, tcp_queue->o_req,
+		          tcp_queue->o_req->tag, ret, tcp_queue->o_totalsize, tcp_queue->o_rwsize,
+		          tcp_queue->o_totalsize - tcp_queue->o_rwsize);
 		if (tcp_queue->o_rwsize < tcp_queue->o_totalsize) {
 			return ret;
 		}
@@ -729,21 +739,21 @@ process_one:
 		tcp_queue->o_totalsize += iov->iov_len;
 	}
 
-	log_debug("queue[%d] req[%p] tag[0x%x]try to send pdu\n", tcp_queue->queue->qid,
-                  tcp_queue->o_req, tcp_queue->o_req->tag);
+	log_debug(ctrl, "queue[%d] req[%p] tag[0x%x]try to send pdu\n", tcp_queue->queue->qid,
+	          tcp_queue->o_req, tcp_queue->o_req->tag);
 	ret = writev(tcp_queue->sockfd, tcp_queue->o_iovs, tcp_queue->o_iovcnt);
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return 0;
 		}
 
-		log_error("writev tcp cmd error, %m");
+		log_error(ctrl, "writev tcp cmd error, %m");
 		return -errno;
 	}
 
-	log_debug("queue[%d] req[%p] tag[0x%x]sending pdu %ld bytes: total[%ld] - sent[%ld] = "
-                  "remained[%ld]\n", tcp_queue->queue->qid, req, req->tag, ret,
-                  tcp_queue->o_totalsize, ret, tcp_queue->o_totalsize - ret);
+	log_debug(ctrl, "queue[%d] req[%p] tag[0x%x]sending pdu %ld bytes: "
+	          "total[%ld] - sent[%ld] = remained[%ld]\n", tcp_queue->queue->qid, req,
+	          req->tag, ret, tcp_queue->o_totalsize, ret, tcp_queue->o_totalsize - ret);
 
 	if (ret == tcp_queue->o_totalsize) {
 		req = NULL;
@@ -757,6 +767,7 @@ process_one:
 
 static int nvmf_tcp_queue_handle_rsp(struct nvmf_tcp_queue *tcp_queue, struct nvme_tcp_rsp_pdu *pdu)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvme_completion *cqe = &pdu->cqe;
 	struct nvmf_request *req;
 	struct nvmf_tcp_priv *priv;
@@ -765,8 +776,8 @@ static int nvmf_tcp_queue_handle_rsp(struct nvmf_tcp_queue *tcp_queue, struct nv
 	req = nvmf_queue_req_by_tag(tcp_queue->queue, tag);
 	if (!req) {
 		/* TODO need reset controller */
-		log_error("queue[%d] tag[0x%x] invalid tag from controller\n",
-                          tcp_queue->queue->qid, tag);
+		log_error(ctrl, "queue[%d] tag[0x%x] invalid tag from controller\n",
+				  tcp_queue->queue->qid, tag);
 		assert(0);
 		return 0;
 	}
@@ -785,11 +796,12 @@ static int nvmf_tcp_queue_handle_rsp(struct nvmf_tcp_queue *tcp_queue, struct nv
 
 	nvmf_req_set_done(req, true);
 
-	log_debug("queue[%d] handle rsp, queue: %d, result: 0x%llx, req[%p] tag[0x%x] sq_head: %d, "
-                  "sq_id: %d, command_id: 0x%x, status: 0x%x\n", tcp_queue->queue->qid,
-                  nvmf_tcp_queue_id(tcp_queue), le64toh(cqe->result.u64), req, tag,
-                  le16toh(cqe->sq_head), le16toh(cqe->sq_id), cqe->command_id,
-                  le16toh(cqe->status));
+	log_debug(ctrl, "queue[%d] handle rsp, queue: %d, result: 0x%llx, req[%p] tag[0x%x]"
+	          "sq_head: %d, sq_id: %d, command_id: 0x%x, status: 0x%x\n",
+	          tcp_queue->queue->qid,
+	          nvmf_tcp_queue_id(tcp_queue), le64toh(cqe->result.u64), req, tag,
+	          le16toh(cqe->sq_head), le16toh(cqe->sq_id), cqe->command_id,
+	          le16toh(cqe->status));
 
 	return 0;
 }
@@ -797,6 +809,7 @@ static int nvmf_tcp_queue_handle_rsp(struct nvmf_tcp_queue *tcp_queue, struct nv
 static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
                                           struct nvme_tcp_data_pdu *pdu)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvmf_request *req;
 	struct nvmf_tcp_priv *priv;
 	__u16 tag = pdu->command_id;
@@ -811,18 +824,18 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 
 	req = nvmf_queue_req_by_tag(tcp_queue->queue, tag);
 	if (!req) {
-		log_error("queue[%d] tag[0x%x] not found\n", tcp_queue->queue->qid, tag);
+		log_error(ctrl, "queue[%d] tag[0x%x] not found\n", tcp_queue->queue->qid, tag);
 		return -EINVAL;
 	}
 
-	log_debug("queue[%d] handle c2h data: req[%p] tag[0x%x] ttag: 0x%x, offset: %d, "
-                  "length: %d\n", tcp_queue->queue->qid, req, pdu->command_id, pdu->ttag,
-                  data_offset, data_length);
+	log_debug(ctrl, "queue[%d] handle c2h data: req[%p] tag[0x%x] ttag: 0x%x, offset: %d, "
+	          "length: %d\n", tcp_queue->queue->qid, req, pdu->command_id, pdu->ttag,
+	          data_offset, data_length);
 
 	length = nvmf_tcp_iov_datalen(req);
 	if (data_offset + data_length > length) {
-		log_error("read buf is not enough, offset[%d] + length[%d] < datalen[%d]\n",
-                          data_offset, data_length, length);
+		log_error(ctrl, "read buf is not enough, offset[%d] + length[%d] < datalen[%d]\n",
+		          data_offset, data_length, length);
 		return -EINVAL;
 	}
 
@@ -900,12 +913,12 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 			return 0;
 		}
 
-		log_error("readv tcp cmd error, %m\n");
+		log_error(ctrl, "readv tcp cmd error, %m\n");
 		return -errno;
 	}
 
-	log_debug("queue[%d] input req total %lu, rwsize %lu, i_iovcnt %d\n",
-                  tcp_queue->queue->qid, tcp_queue->i_totalsize, ret, tcp_queue->i_iovcnt);
+	log_debug(ctrl, "queue[%d] input req total %lu, rwsize %lu, i_iovcnt %d\n",
+              tcp_queue->queue->qid, tcp_queue->i_totalsize, ret, tcp_queue->i_iovcnt);
 	if (ret == tcp_queue->i_totalsize) {
 		nvmf_tcp_queue_clear_input(tcp_queue);
 		return 0;
@@ -919,6 +932,7 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 static int nvmf_tcp_send_h2c_data(struct nvmf_tcp_queue *tcp_queue, struct nvmf_request *req,
                                   struct nvme_tcp_r2t_pdu *r2tpdu)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvmf_tcp_priv *priv = (struct nvmf_tcp_priv *)req->priv;
 	struct nvme_tcp_data_pdu *pdu;
 	struct nvme_tcp_hdr *hdr;
@@ -938,8 +952,8 @@ static int nvmf_tcp_send_h2c_data(struct nvmf_tcp_queue *tcp_queue, struct nvmf_
 	ddgst = nvme_tcp_ddgst_len(tcp_queue);
 
 	data_len = nvmf_tcp_iov_datalen(req);
-	log_debug("queue[%d] req[%p] tag[0x%x] offset %d, length %d, data_len %d\n",
-                  tcp_queue->queue->qid, req, tag, offset, length, data_len);
+	log_debug(ctrl, "queue[%d] req[%p] tag[0x%x] offset %d, length %d, data_len %d\n",
+	          tcp_queue->queue->qid, req, tag, offset, length, data_len);
 	assert(offset + length <= data_len);
 
 	hdr = &pdu->hdr;
@@ -1003,6 +1017,7 @@ static int nvmf_tcp_send_h2c_data(struct nvmf_tcp_queue *tcp_queue, struct nvmf_
 
 static int nvmf_tcp_queue_handle_r2t(struct nvmf_tcp_queue *tcp_queue, struct nvme_tcp_r2t_pdu *pdu)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvmf_request *req;
 	__u16 tag = pdu->command_id;
 	int ret;
@@ -1010,13 +1025,13 @@ static int nvmf_tcp_queue_handle_r2t(struct nvmf_tcp_queue *tcp_queue, struct nv
 	req = nvmf_queue_req_by_tag(tcp_queue->queue, tag);
 	if (!req) {
 		/* TODO need reset controller */
-		log_warn("r2t: queue[%d] invalid tag[0x%x]\n", tcp_queue->queue->qid, tag);
+		log_warn(ctrl, "r2t: queue[%d] invalid tag[0x%x]\n", tcp_queue->queue->qid, tag);
 		return -EINVAL;
 	}
 
-	log_debug("queue[%d] handle r2t: req[%p] tag[0x%x] ttag: 0x%x, r2t_offset: %d,"
-                  "r2t_length: %d\n", tcp_queue->queue->qid, req, pdu->command_id, pdu->ttag,
-                  le32toh(pdu->r2t_offset), le32toh(pdu->r2t_length));
+	log_debug(ctrl, "queue[%d] handle r2t: req[%p] tag[0x%x] ttag: 0x%x, r2t_offset: %d,"
+	          "r2t_length: %d\n", tcp_queue->queue->qid, req, pdu->command_id, pdu->ttag,
+	          le32toh(pdu->r2t_offset), le32toh(pdu->r2t_length));
 
 	ret = nvmf_tcp_send_h2c_data(tcp_queue, req, pdu);
 
@@ -1025,6 +1040,7 @@ static int nvmf_tcp_queue_handle_r2t(struct nvmf_tcp_queue *tcp_queue, struct nv
 
 static int nvmf_tcp_queue_recv(struct nvmf_tcp_queue *tcp_queue)
 {
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvme_tcp_rsp_pdu *pdu = &tcp_queue->rsppdu;
 	struct nvme_tcp_hdr *hdr = &pdu->hdr;
 	struct iovec iovs[QUEUE_MAX_IOV];
@@ -1061,7 +1077,7 @@ static int nvmf_tcp_queue_recv(struct nvmf_tcp_queue *tcp_queue)
 				return 0;
 			}
 
-			log_error("readv tcp cmd error, %m\n");
+			log_error(ctrl, "readv tcp cmd error, %m\n");
 			return -errno;
 		}
 
@@ -1078,14 +1094,14 @@ process_one:
 	/* TODO corrupted CQE, need reset ctrl */
 	memset((char *)pdu + tcp_queue->pdu_rwsize, 0x00, sizeof(*pdu) - tcp_queue->pdu_rwsize);
 	ret = read(tcp_queue->sockfd, (char *)pdu + tcp_queue->pdu_rwsize,
-                   sizeof(*pdu) - tcp_queue->pdu_rwsize);
-	log_debug("queue[%d] ret %ld, errno %d\n", tcp_queue->queue->qid, ret, errno);
+	           sizeof(*pdu) - tcp_queue->pdu_rwsize);
+	log_debug(ctrl, "queue[%d] ret %ld, errno %d\n", tcp_queue->queue->qid, ret, errno);
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
 			return 0;
 		}
 
-		log_error("read pdu error, queue %d: %m\n", nvmf_tcp_queue_id(tcp_queue));
+		log_error(ctrl, "read pdu error, queue %d: %m\n", nvmf_tcp_queue_id(tcp_queue));
 		return -errno;
 	} else if (ret == 0) {
 		/* no more data */
@@ -1093,15 +1109,15 @@ process_one:
 	}
 
 	if ((ret + tcp_queue->pdu_rwsize) < sizeof(*pdu)) {
-		tcp_queue->pdu_rwsize = ret;
+		tcp_queue->pdu_rwsize += ret;
 		return 0;
 	} else {
 		tcp_queue->pdu_rwsize = 0;
 	}
 
-	log_debug("queue[%d] read pdu ret: %ld, type: %d, flags: %d, hlen: %d, pdo: %d, "
-                  "plen : %d\n", tcp_queue->queue->qid, ret, hdr->type, hdr->flags, hdr->hlen,
-                  hdr->pdo, hdr->plen);
+	log_debug(ctrl, "queue[%d] read pdu ret: %ld, type: %d, flags: %d, hlen: %d, pdo: %d, "
+	          "plen : %d\n", tcp_queue->queue->qid, ret, hdr->type, hdr->flags, hdr->hlen,
+	          hdr->pdo, hdr->plen);
 	switch (hdr->type) {
 	case nvme_tcp_rsp:
 		ret = nvmf_tcp_queue_handle_rsp(tcp_queue, pdu);
@@ -1113,10 +1129,10 @@ process_one:
 		ret = nvmf_tcp_queue_handle_r2t(tcp_queue, (struct nvme_tcp_r2t_pdu *)pdu);
 		break;
 	default:
-		log_error("queue[%d] read pdu ret: %ld, type: %d, flags: %d, hlen: %d, pdo: %d, "
-                          "plen : %d\n", tcp_queue->queue->qid, ret, hdr->type, hdr->flags,
-                          hdr->hlen, hdr->pdo, hdr->plen);
-		nvmf_tcp_queue_dump(tcp_queue);
+		log_error(ctrl, "queue[%d] read pdu ret: %ld, type: %d, flags: %d, "
+                  "hlen: %d, pdo: %d, plen : %d\n", tcp_queue->queue->qid, ret,
+		          hdr->type, hdr->flags, hdr->hlen, hdr->pdo, hdr->plen);
+		nvmf_tcp_queue_dump(ctrl, tcp_queue);
 		assert(0);
 		ret = -EIO;
 		break;
@@ -1133,10 +1149,11 @@ process_one:
 static struct nvmf_request *nvmf_tcp_alloc_request(struct nvmf_queue *queue)
 {
 	struct nvmf_tcp_queue *tcp_queue = (struct nvmf_tcp_queue *)queue->priv;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_request *req;
 	struct nvmf_tcp_priv *priv;
 
-	log_trace();
+	log_trace(ctrl);
 
 	req = (struct nvmf_request *)slab_alloc(queue->slab_req);
 	if (!req) {
@@ -1144,7 +1161,7 @@ static struct nvmf_request *nvmf_tcp_alloc_request(struct nvmf_queue *queue)
 	}
 
 	priv = (struct nvmf_tcp_priv *)slab_alloc(tcp_queue->slab_priv);
-	assert(priv);	/* it should not happen */
+	assert(priv);    /* it should not happen */
 
 	memset(req, 0x00, sizeof(*req));
 	memset(priv, 0x00, sizeof(*priv));
@@ -1161,8 +1178,9 @@ static void nvmf_tcp_free_request(struct nvmf_request *req)
 {
 	struct nvmf_queue *queue = req->queue;
 	struct nvmf_tcp_queue *tcp_queue = (struct nvmf_tcp_queue *)queue->priv;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 
-	log_trace();
+	log_trace(ctrl);
 
 	slab_free(tcp_queue->slab_priv, req->priv);
 	slab_free(queue->slab_req, req);
@@ -1170,7 +1188,8 @@ static void nvmf_tcp_free_request(struct nvmf_request *req)
 
 static int nvmf_tcp_queue_request(struct nvmf_request *req, struct iovec *iovs, int iovcnt)
 {
-	log_trace();
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
+	log_trace(ctrl);
 
 	assert(iovcnt < QUEUE_MAX_IOV);
 	req->iovcnt = iovcnt;
@@ -1204,8 +1223,9 @@ static int nvmf_tcp_queue_event(struct nvmf_queue *queue)
 static void nvmf_tcp_queue_error(struct nvmf_tcp_queue *tcp_queue)
 {
 	struct nvmf_queue *queue = tcp_queue->queue;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 
-	log_error("queue[%d]fatal connection error\n", queue->qid);
+	log_error(ctrl, "queue[%d]fatal connection error\n", queue->qid);
 	/* connection error, tcp queue has to stop any IO */
 	nvmf_queue_set_event(queue, tcp_queue->sockfd, NULL, NULL);
 
@@ -1215,11 +1235,12 @@ static void nvmf_tcp_queue_error(struct nvmf_tcp_queue *tcp_queue)
 static int nvmf_tcp_ctrl_process_queue(struct nvmf_queue *queue, short revents)
 {
 	struct nvmf_tcp_queue *tcp_queue = (struct nvmf_tcp_queue *)queue->priv;
+	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	int fd = nvmf_tcp_queue_fd(queue);
 	int ret = 0;
 	short events;
 
-	log_trace();
+	log_trace(ctrl);
 
 	if (revents & POLLIN) {
 		ret = nvmf_tcp_queue_recv(tcp_queue);
@@ -1238,7 +1259,7 @@ static int nvmf_tcp_ctrl_process_queue(struct nvmf_queue *queue, short revents)
 
 	events = nvmf_tcp_queue_event(queue);
 	nvmf_queue_set_event(queue, fd, nvmf_tcp_ctrl_process_queue,
-                             events & POLLOUT ? nvmf_tcp_ctrl_process_queue : NULL);
+                         events & POLLOUT ? nvmf_tcp_ctrl_process_queue : NULL);
 
 	return ret;
 }

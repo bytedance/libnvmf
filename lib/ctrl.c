@@ -45,7 +45,7 @@ void nvmf_ctrl_kick(struct nvmf_ctrl *ctrl)
 
 	if (!nvmf_ctrl_get_running(ctrl))
 		if (write(ctrl->eventfd, &u, sizeof(u)) < 0) {
-			log_error("write eventfd failed, %m");
+			log_error(ctrl, "write eventfd failed, %m");
 		}
 }
 
@@ -62,7 +62,7 @@ int nvmf_ctrl_enable(struct nvmf_ctrl *ctrl)
 	__u64 reg_cap;
 	__u32 reg_vs;
 
-	log_trace();
+	log_trace(ctrl);
 	/* read reg_vs from controller */
 	ret = nvmf_reg_read32(ctrl, NVME_REG_VS, &reg_vs);
 	if (ret < 0) {
@@ -70,7 +70,7 @@ int nvmf_ctrl_enable(struct nvmf_ctrl *ctrl)
 	}
 
 	ctrl->reg_vs = reg_vs;
-	log_debug("read cap NVME_REG_VS: 0x%x\n", ctrl->reg_vs);
+	log_debug(ctrl, "read cap NVME_REG_VS: 0x%x\n", ctrl->reg_vs);
 
 	/* read reg_cap from controller */
 	ret = nvmf_reg_read64(ctrl, NVME_REG_CAP, &reg_cap);
@@ -79,24 +79,24 @@ int nvmf_ctrl_enable(struct nvmf_ctrl *ctrl)
 	}
 
 	ctrl->reg_cap = reg_cap;
-	log_debug("read cap NVME_REG_CAP: 0x%llx\n", ctrl->reg_cap);
+	log_debug(ctrl, "read cap NVME_REG_CAP: 0x%llx\n", ctrl->reg_cap);
 
 	/* check cap */
 	cap_mpsmin = NVME_CAP_MPSMIN(reg_cap) + NVMF_DEF_PAGE_SHIFT;
 	if (host_page_shift < cap_mpsmin) {
-		log_error("MPSMIN check failed, host %d, controller %d\n", host_page_shift,
+		log_error(ctrl, "MPSMIN check failed, host %d, controller %d\n", host_page_shift,
                           cap_mpsmin);
 		return -ENODEV;
 	}
 
 	cap_stride = NVME_CAP_STRIDE(reg_cap);
 	if (cap_stride) {
-		log_warn("unexpected cap stride: %d\n", cap_stride);
+		log_warn(ctrl, "unexpected cap stride: %d\n", cap_stride);
 	}
 
 	cap_mqes = NVME_CAP_MQES(ctrl->reg_cap);
 	if (cap_mqes < ctrl->opts->qsize) {
-		log_warn("cap mqes %d < opt queue entries %d, set entries to %d\n", cap_mqes,
+		log_warn(ctrl, "cap mqes %d < opt queue entries %d, set entries to %d\n", cap_mqes,
                          ctrl->opts->qsize, cap_mqes);
 		ctrl->opts->qsize = cap_mqes;
 	}
@@ -165,12 +165,12 @@ static int nvmf_setup_admin_queue(void *arg)
 	struct nvmf_queue *queue = (struct nvmf_queue *)arg;
 	struct nvmf_ctrl *ctrl = queue->ctrl;
 
-	log_trace();
+	log_trace(ctrl);
 	assert(queue->qid == 0);
 
 	ret = ctrl->ops->create_queue(queue);
 	if (ret) {
-		log_error("create queue[%d] failed, %s\n", 0, strerror(ret));
+		log_error(ctrl, "create queue[%d] failed, %s\n", 0, strerror(ret));
 		return ret;
 	}
 
@@ -212,7 +212,7 @@ static int nvmf_ctrl_setup(struct nvmf_ctrl *ctrl)
 	int ret, i;
 	struct nvmf_queue *queue;
 
-	log_trace();
+	log_trace(ctrl);
 	/* setup admin queue */
 	queue = ctrl->queues;
 	nvmf_queue_thread_start(queue);
@@ -237,9 +237,10 @@ static int nvmf_ctrl_setup(struct nvmf_ctrl *ctrl)
 static int nvmf_restart_admin_queue(void *arg)
 {
 	struct nvmf_queue *queue = (struct nvmf_queue *)arg;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	int ret;
 
-	log_trace();
+	log_trace(ctrl);
 	assert(queue->qid == 0);
 
 	/* save all inflight request to retransfer queue */
@@ -247,7 +248,7 @@ static int nvmf_restart_admin_queue(void *arg)
 
 	ret = nvmf_queue_restart(queue);
 	if (ret) {
-		log_error("restart queue[%d] failed, %s\n", 0, strerror(ret));
+		log_error(ctrl, "restart queue[%d] failed, %s\n", 0, strerror(ret));
 		return ret;
 	}
 
@@ -289,7 +290,7 @@ static int nvmf_ctrl_reset(struct nvmf_ctrl *ctrl)
 	struct nvmf_queue *queue;
 	int ret, i;
 
-	log_error("ctrl reset\n");
+	log_error(ctrl, "ctrl reset\n");
 	/* mark all the queue into ERROR state to stop IO processing */
 	for (i = 0; i < ctrl->opts->nr_queues; i++) {
 		queue = ctrl->queues + i;
@@ -394,7 +395,7 @@ static int nvmf_ctrl_wait_ready(struct nvmf_ctrl *ctrl, bool enable)
 			return -ENODEV;
 		}
 
-		log_debug("read cap NVME_REG_CSTS: 0x%x\n", reg_csts);
+		log_debug(ctrl, "read cap NVME_REG_CSTS: 0x%x\n", reg_csts);
 		if ((reg_csts & NVME_CSTS_RDY) == bit) {
 			return 0;
 		}
@@ -424,7 +425,7 @@ void nvmf_ctrl_process(nvmf_ctrl_t ctrl)
 	struct nvme_completion *cqe;
 	uint64_t u = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	nvmf_ctrl_set_running(ctrl, true);
 
 	/* consume all events */
@@ -433,7 +434,7 @@ void nvmf_ctrl_process(nvmf_ctrl_t ctrl)
 	while (!llist_empty(&__ctrl->complete)) {
 		nodes = llist_del_all(&__ctrl->complete);
 		llist_for_each_entry_safe(req, tmp, nodes, llist) {
-			log_debug("tag[0x%x]processed in main thread\n", req->tag);
+			log_debug(ctrl, "tag[0x%x]processed in main thread\n", req->tag);
 			nvmf_request_set_lat(req, REQ_DONE);
 			req->done = true;
 			cqe = req->cqe;
@@ -465,12 +466,12 @@ static struct nvme_ns *nvmf_ns_find_by_id(struct nvmf_ctrl *ctrl, unsigned int n
 	for (idx = 0; idx < ctrl->nscount; idx++) {
 		if (ctrl->nslist[idx].nsid == nsid) {
 			ns = &ctrl->nslist[idx];
-			log_debug("find nsid %d\n", nsid);
+			log_debug(ctrl, "find nsid %d\n", nsid);
 			return ns;
 		}
 	}
 
-	log_warn("can not find nsid %d\n", nsid);
+	log_warn(ctrl, "can not find nsid %d\n", nsid);
 
 	return NULL;
 }
@@ -481,13 +482,13 @@ int nvmf_ns_active_list_identify(struct nvmf_ctrl *ctrl)
 
 	ret = nvmf_identify(ctrl, NVME_ID_CNS_NS_ACTIVE_LIST);
 	if (ret < 0) {
-		log_warn("nvmf_identify NVME_ID_CNS_NS_ACTIVE_LIST failed, ret %d\n", ret);
+		log_warn(ctrl, "nvmf_identify NVME_ID_CNS_NS_ACTIVE_LIST failed, ret %d\n", ret);
 		return ret;
 	}
 
 	ctrl->ns = nvmf_ns_find_by_id(ctrl, ctrl->opts->nsid);
 	if (!ctrl->ns) {
-		log_error("scan target without nsid %d from options\n", ctrl->opts->nsid);
+		log_error(ctrl, "scan target without nsid %d from options\n", ctrl->opts->nsid);
 		return -EINVAL;
 	}
 
@@ -532,7 +533,7 @@ unsigned char nvmf_ns_lbads(nvmf_ctrl_t ctrl, unsigned int nsid)
 
 	ns = nvmf_ns_find_by_id(ctrl, nsid);
 	if (!ns) {
-		log_error("scan controller without nsid %d\n", nsid);
+		log_error(ctrl, "scan controller without nsid %d\n", nsid);
 		return 0;
 	}
 
@@ -545,7 +546,7 @@ unsigned long nvmf_ns_nsze(nvmf_ctrl_t ctrl, unsigned int nsid)
 
 	ns = nvmf_ns_find_by_id(ctrl, nsid);
 	if (!ns) {
-		log_error("scan controller without nsid %d\n", nsid);
+		log_error(ctrl, "scan controller without nsid %d\n", nsid);
 		return 0;
 	}
 

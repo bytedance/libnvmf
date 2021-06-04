@@ -212,6 +212,7 @@ int main(int argc, char *argv[])
 	struct sigaction sa;
 	int long_index = 0, opt;
 	char *filename = NULL;
+	char *err_msg = NULL;
 	static struct option long_options[] = {
 		{"bs",              required_argument, 0,  'b' },
 		{"iodepth",         required_argument, 0,  'd' },
@@ -278,8 +279,10 @@ int main(int argc, char *argv[])
 
 	signal(SIGPIPE, SIG_IGN);
 
-	options = nvmf_default_options(filename);
+	options = nvmf_default_options(filename, &err_msg);
 	if (!options) {
+	    printf("%s", err_msg);
+	    free(err_msg);
 		return -1;
 	}
 

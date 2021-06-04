@@ -22,16 +22,17 @@ static void nvmf_connect_admin_queue_cb(struct nvmf_request *req, void *opaque)
 	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_completion *cqe = req->cqe;
 
-	log_trace();
+	log_trace(ctrl);
 
 	if (le16toh(cqe->status) != NVME_SC_SUCCESS) {
-		log_error("queue[%d]connect admin queue error, status %d\n", req->queue->qid,
-                          le16toh(cqe->status));
+		log_error(ctrl, "queue[%d]connect admin queue error, status %d\n", req->queue->qid,
+		          le16toh(cqe->status));
 		return;
 	}
 
 	ctrl->cntlid = le16toh(cqe->result.u16);
-	log_debug("queue[%d]connect admin queue, cntlid: %d\n", req->queue->qid, ctrl->cntlid);
+	log_debug(ctrl, "queue[%d]connect admin queue, cntlid: %d\n", req->queue->qid,
+	          ctrl->cntlid);
 }
 
 static int nvmf_connect_admin_queue_req(struct nvmf_request *req, struct nvmf_queue *queue,
@@ -76,14 +77,14 @@ int nvmf_connect_admin_queue(struct nvmf_queue *queue)
 	struct nvmf_ctrl *ctrl;
 	struct iovec iov;
 	int ret = 0;
+	ctrl = queue->ctrl;
 
-	log_trace();
+	log_trace(ctrl);
 	data = (struct nvmf_connect_data *)nvmf_calloc(1, sizeof(*data));
 	if (!data) {
 		return -ENOMEM;
 	}
 
-	ctrl = queue->ctrl;
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return -ENOMEM;
@@ -101,8 +102,8 @@ int nvmf_connect_admin_queue(struct nvmf_queue *queue)
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("queue[%d]connect admin queue error, status 0x%x\n", queue->qid,
-                          le16toh(cqe->status));
+		log_error(ctrl, "queue[%d]connect admin queue error, status 0x%x\n", queue->qid,
+		          le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -114,18 +115,19 @@ int nvmf_connect_admin_queue(struct nvmf_queue *queue)
 
 static void nvmf_connect_io_queue_cb(struct nvmf_request *req, void *opaque)
 {
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_completion *cqe = req->cqe;
 
-	log_trace();
+	log_trace(ctrl);
 
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("queue[%d]connect io queue error, status 0x%x\n", req->queue->qid,
-                          cqe->status);
+		log_error(ctrl, "queue[%d]connect io queue error, status 0x%x\n", req->queue->qid,
+		          cqe->status);
 		return;
 	}
 
 	assert(req->queue->qid == le16toh(req->cmd->connect.qid));
-	log_debug("queue[%d]connect io queue\n", le16toh(req->cmd->connect.qid));
+	log_debug(ctrl, "queue[%d]connect io queue\n", le16toh(req->cmd->connect.qid));
 }
 
 static int nvmf_connect_io_queue_req(struct nvmf_request *req, struct nvmf_queue *queue,
@@ -160,14 +162,14 @@ int nvmf_connect_io_queue(struct nvmf_queue *queue)
 	struct nvmf_ctrl *ctrl;
 	struct iovec iov;
 	int ret = 0;
+	ctrl = queue->ctrl;
 
-	log_trace();
+	log_trace(ctrl);
 	data = (struct nvmf_connect_data *)nvmf_calloc(1, sizeof(*data));
 	if (!data) {
 		return -ENOMEM;
 	}
 
-	ctrl = queue->ctrl;
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return -ENOMEM;
@@ -185,8 +187,8 @@ int nvmf_connect_io_queue(struct nvmf_queue *queue)
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("queue[%d]connect error, status 0x%x\n", queue->qid,
-                          le16toh(cqe->status));
+		log_error(ctrl, "queue[%d]connect error, status 0x%x\n", queue->qid,
+		          le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -209,7 +211,7 @@ static void nvmf_reg_to_ctrl(struct nvmf_ctrl *ctrl, __u32 offset, __u64 res)
 		ctrl->reg_csts = (__u32)res;
 		break;
 	default:
-		log_error("unknown offset 0x%x, res 0x%llx\n", offset, res);
+		log_error(ctrl, "unknown offset 0x%x, res 0x%llx\n", offset, res);
 	}
 
 }
@@ -227,15 +229,15 @@ static void nvmf_reg_read32_cb(struct nvmf_request *req, void *opaque)
 	__u64 res;
 	__u32 offset = le32toh(req->cmd->prop_get.offset);
 
-	log_trace();
+	log_trace(ctrl);
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("reg read32 error, offset 0x%x, status 0x%x\n", offset,
-                          le16toh(cqe->status));
+		log_error(ctrl, "reg read32 error, offset 0x%x, status 0x%x\n", offset,
+                  le16toh(cqe->status));
 		return;
 	}
 
 	res = le64toh(cqe->result.u64);
-	log_debug("reg read64 succeed, offset 0x%x, res: 0x%llx\n", offset, res);
+	log_debug(ctrl, "reg read64 succeed, offset 0x%x, res: 0x%llx\n", offset, res);
 	if (val) {
 		*val = le64toh(cqe->result.u64);
 	}
@@ -267,10 +269,10 @@ int nvmf_reg_read32(struct nvmf_ctrl *ctrl, __u32 offset, __u32 *val)
 {
 	struct nvmf_request *req;
 	struct nvme_completion *cqe;
-	struct nvmf_queue *queue = ctrl->queues;	/* admin queue */
+	struct nvmf_queue *queue = ctrl->queues;    /* admin queue */
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return -ENOMEM;
@@ -286,8 +288,8 @@ int nvmf_reg_read32(struct nvmf_ctrl *ctrl, __u32 offset, __u32 *val)
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("reg read32 error, offset 0x%x, status 0x%x\n", offset,
-                          le16toh(cqe->status));
+		log_error(ctrl, "reg read32 error, offset 0x%x, status 0x%x\n", offset,
+		          le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -309,15 +311,15 @@ static void nvmf_reg_read64_cb(struct nvmf_request *req, void *opaque)
 	__u64 res;
 	__u32 offset = le32toh(req->cmd->prop_get.offset);
 
-	log_trace();
+	log_trace(ctrl);
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("reg read32 error, offset 0x%x, status 0x%x\n", offset,
-                le16toh(cqe->status));
+		log_error(ctrl, "reg read32 error, offset 0x%x, status 0x%x\n", offset,
+		          le16toh(cqe->status));
 		return;
 	}
 
 	res = le64toh(cqe->result.u64);
-	log_debug("reg read64 succeed, offset 0x%x, res: 0x%llx\n", offset, res);
+	log_debug(ctrl, "reg read64 succeed, offset 0x%x, res: 0x%llx\n", offset, res);
 	if (val) {
 		*val = le64toh(cqe->result.u64);
 	}
@@ -348,10 +350,10 @@ int nvmf_reg_read64(struct nvmf_ctrl *ctrl, __u32 offset, __u64 *val)
 {
 	struct nvmf_request *req;
 	struct nvme_completion *cqe;
-	struct nvmf_queue *queue = ctrl->queues;	/* admin queue */
+	struct nvmf_queue *queue = ctrl->queues;    /* admin queue */
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return -ENOMEM;
@@ -367,8 +369,8 @@ int nvmf_reg_read64(struct nvmf_ctrl *ctrl, __u32 offset, __u64 *val)
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("reg read64 error, offset 0x%x, status 0x%x\n", offset,
-                          le16toh(cqe->status));
+		log_error(ctrl, "reg read64 error, offset 0x%x, status 0x%x\n", offset,
+		          le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -380,14 +382,15 @@ int nvmf_reg_read64(struct nvmf_ctrl *ctrl, __u32 offset, __u64 *val)
 static void nvmf_reg_write32_cb(struct nvmf_request *req, void *opaque)
 {
 	struct nvme_completion *cqe = req->cqe;
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 
-	log_trace();
+	log_trace(ctrl);
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("reg write32 error, status 0x%x\n", le16toh(cqe->status));
+		log_error(ctrl, "reg write32 error, status 0x%x\n", le16toh(cqe->status));
 		return;
 	}
 
-	log_debug("reg write32 succeed\n");
+	log_debug(ctrl, "reg write32 succeed\n");
 }
 
 static int nvmf_reg_write32_req(struct nvmf_request *req, struct nvmf_queue *queue, __u64 off,
@@ -414,10 +417,10 @@ int nvmf_reg_write32(struct nvmf_ctrl *ctrl, __u64 offset, __u64 val)
 {
 	struct nvmf_request *req;
 	struct nvme_completion *cqe;
-	struct nvmf_queue *queue = ctrl->queues;	/* admin queue */
+	struct nvmf_queue *queue = ctrl->queues;    /* admin queue */
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return -ENOMEM;
@@ -433,7 +436,7 @@ int nvmf_reg_write32(struct nvmf_ctrl *ctrl, __u64 offset, __u64 val)
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("reg read64 error, status 0x%x\n", le16toh(cqe->status));
+		log_error(ctrl, "reg read64 error, status 0x%x\n", le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -444,15 +447,16 @@ int nvmf_reg_write32(struct nvmf_ctrl *ctrl, __u64 offset, __u64 val)
 
 static void nvmf_set_features_cb(struct nvmf_request *req, void *opaque)
 {
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_completion *cqe = req->cqe;
 
-	log_trace();
+	log_trace(ctrl);
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("set features error, status 0x%x\n", le16toh(cqe->status));
+		log_error(ctrl, "set features error, status 0x%x\n", le16toh(cqe->status));
 		return;
 	}
 
-	log_debug("set features succeed\n");
+	log_debug(ctrl, "set features succeed\n");
 }
 
 static int nvmf_set_features_req(struct nvmf_request *req, struct nvmf_queue *queue, __u32 feature,
@@ -477,10 +481,10 @@ int nvmf_set_features(struct nvmf_ctrl *ctrl, __u32 feature, __u32 val)
 {
 	struct nvmf_request *req;
 	struct nvme_completion *cqe;
-	struct nvmf_queue *queue = ctrl->queues;	/* admin queue */
+	struct nvmf_queue *queue = ctrl->queues;    /* admin queue */
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return -ENOMEM;
@@ -496,7 +500,7 @@ int nvmf_set_features(struct nvmf_ctrl *ctrl, __u32 feature, __u32 val)
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("set feature error, status 0x%x\n", le16toh(cqe->status));
+		log_error(ctrl, "set feature error, status 0x%x\n", le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -507,11 +511,12 @@ int nvmf_set_features(struct nvmf_ctrl *ctrl, __u32 feature, __u32 val)
 
 static void nvmf_keepalive_cb(struct nvmf_request *req, void *opaque)
 {
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_completion *cqe = req->cqe;
 
-	log_trace();
+	log_trace(ctrl);
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("keepalive error, status 0x%x\n", le16toh(cqe->status));
+		log_error(ctrl, "keepalive error, status 0x%x\n", le16toh(cqe->status));
 		return;
 	}
 
@@ -520,7 +525,7 @@ static void nvmf_keepalive_cb(struct nvmf_request *req, void *opaque)
 		req->ucb(cqe->status, req->uopaque);
 	}
 
-	log_debug("keepalive succeed\n");
+	log_debug(ctrl, "keepalive succeed\n");
 }
 
 static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl *ctrl, __u8 cns,
@@ -531,7 +536,7 @@ static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl
 	struct nvme_ns *ns;
 	__le32 *nsid, nn, maxnn, idx;
 
-	log_trace();
+	log_trace(ctrl);
 	switch (cns) {
 	case NVME_ID_CNS_NS:
 		idns = (struct nvme_id_ns *)id;
@@ -543,18 +548,18 @@ static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl
 		/* ref: Identify - LBA Format Data Structure, NVM Command Set Specific */
 		if (!ns->lbads) {
 			ns->lbads = 9;
-			log_warn("ns lbads is not supported, use default val 9");
+			log_warn(ctrl, "ns lbads is not supported, use default val 9");
 		}
-		log_debug("nsid: %d, nsze: %lld, ncap: 0x%llx, lbads = %d\n", ns->nsid, ns->nsze,
-                          ns->ncap, ns->lbads);
+		log_debug(ctrl, "nsid: %d, nsze: %lld, ncap: 0x%llx, lbads = %d\n", ns->nsid,
+				  ns->nsze, ns->ncap, ns->lbads);
 		break;
 
 	case NVME_ID_CNS_CTRL:
 		idctrl = (struct nvme_id_ctrl *)id;
 
 		if (ctrl->cntlid != le16toh(idctrl->cntlid)) {
-			log_error("cntlid mismatch: connected %d & identify %d\n", ctrl->cntlid,
-                                  le16toh(idctrl->cntlid));
+			log_error(ctrl, "cntlid mismatch: connected %d & identify %d\n",
+			          ctrl->cntlid, le16toh(idctrl->cntlid));
 			return;
 		}
 
@@ -564,7 +569,7 @@ static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl
 		ctrl->mdts = idctrl->mdts;
 		if (!ctrl->mdts) {
 			ctrl->mdts = NVMF_DEF_MDTS;
-			log_debug("identify mdts 0, align to %d\n", NVMF_DEF_MDTS);
+			log_debug(ctrl, "identify mdts 0, align to %d\n", NVMF_DEF_MDTS);
 		}
 		ctrl->vwc = idctrl->vwc;
 		ctrl->ioccsz = le32toh(idctrl->ioccsz);
@@ -572,10 +577,11 @@ static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl
 		ctrl->icdoff = le16toh(idctrl->icdoff);
 		ctrl->maxcmd = le16toh(idctrl->maxcmd);
 		ctrl->oncs = le16toh(idctrl->oncs);
-		log_debug("sn: %20s, mn: %40s, nn: %d, mdts: %d, vwc: %d, ioccsz: %d, iorcsz: %d, "
-                          "icdoff: %d, maxcmd: %d, oncs: 0x%x\n", ctrl->sn, ctrl->mn, ctrl->nn,
-                          ctrl->mdts, ctrl->vwc, ctrl->ioccsz, ctrl->iorcsz, ctrl->icdoff,
-                          ctrl->maxcmd, ctrl->oncs);
+		log_debug(ctrl, "sn: %20s, mn: %40s, nn: %d, mdts: %d, vwc: %d, "
+		          "ioccsz: %d, iorcsz: %d, icdoff: %d, maxcmd: %d, oncs:"
+		          " 0x%x\n", ctrl->sn, ctrl->mn, ctrl->nn, ctrl->mdts,
+		          ctrl->vwc, ctrl->ioccsz, ctrl->iorcsz, ctrl->icdoff,
+		          ctrl->maxcmd, ctrl->oncs);
 		break;
 
 	case NVME_ID_CNS_NS_ACTIVE_LIST:
@@ -595,7 +601,7 @@ static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl
 				continue;
 			}
 
-			log_debug("ns active list: %d\n", le32toh(*nsid));
+			log_debug(ctrl, "ns active list: %d\n", le32toh(*nsid));
 			ns->nsid = le32toh(*nsid);
 			ns++;
 			ctrl->nscount++;
@@ -604,7 +610,7 @@ static void nvmf_cmd_identify_to_ctrl(struct nvmf_request *req, struct nvmf_ctrl
 		break;
 
 	default:
-		log_error("unexpected cns %d\n", cns);
+		log_error(ctrl, "unexpected cns %d\n", cns);
 		break;
 	}
 }
@@ -613,19 +619,20 @@ static void nvmf_identify_cb(struct nvmf_request *req, void *opaque)
 {
 	struct nvme_id_ctrl *id;
 	struct nvme_completion *cqe = req->cqe;
+	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	__u8 cns = req->cmd->identify.cns;
 
-	log_trace();
+	log_trace(ctrl);
 	assert(req->iovcnt == 1);
 
 	id = req->iovs[0].iov_base;
 
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("cmd identify error, status 0x%x\n", le16toh(cqe->status));
+		log_error(ctrl, "cmd identify error, status 0x%x\n", le16toh(cqe->status));
 		return;
 	}
 
-	log_debug("cmd identify succeed\n");
+	log_debug(ctrl, "cmd identify succeed\n");
 
 	nvmf_cmd_identify_to_ctrl(req, req->queue->ctrl, cns, id);
 }
@@ -641,12 +648,12 @@ static int nvmf_identify_req(struct nvmf_request *req, struct nvmf_queue *queue,
 	cmd->identify.cns = cns;
 	if (cns == NVME_ID_CNS_NS) {
 		if (!ctrl->ns) {
-			log_error("empty current ns");
+			log_error(ctrl, "empty current ns");
 			return -EINVAL;
 		}
 		cmd->identify.nsid = htole32(ctrl->ns->nsid);
 	} else if (cns == NVME_ID_CNS_NS_ACTIVE_LIST) {
-		cmd->identify.nsid = 0;	/* min nsid */
+		cmd->identify.nsid = 0;    /* min nsid */
 	}
 
 	req->queue = queue;
@@ -659,11 +666,11 @@ int nvmf_identify(struct nvmf_ctrl *ctrl, __u8 cns)
 {
 	struct nvmf_request *req;
 	struct nvme_id_ctrl *id;
-	struct nvmf_queue *queue = ctrl->queues;	/* admin queue */
+	struct nvmf_queue *queue = ctrl->queues;    /* admin queue */
 	struct iovec iov;
 	int ret = 0;
 
-	log_debug("nvmf identify cns %d\n", cns);
+	log_debug(ctrl, "nvmf identify cns %d\n", cns);
 	id = (struct nvme_id_ctrl *)nvmf_calloc(1, sizeof(*id));
 	if (!id) {
 		return -ENOMEM;
@@ -750,12 +757,12 @@ static void nvmf_ns_io_cb(struct nvmf_request *req, void *opaque)
 	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_completion *cqe = req->cqe;
 
-	log_trace();
+	log_trace(ctrl);
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("queue[%d]tag[0x%x], rw error, status 0x%x\n", req->queue->qid, req->tag,
-                          le16toh(cqe->status));
+		log_error(ctrl, "queue[%d]tag[0x%x], rw error, status 0x%x\n",
+		          req->queue->qid, req->tag, le16toh(cqe->status));
 	} else {
-		log_debug("queue[%d]tag[0x%x], rw succeed\n", req->queue->qid, req->tag);
+		log_debug(ctrl, "queue[%d]tag[0x%x], rw succeed\n", req->queue->qid, req->tag);
 	}
 
 	/* after IO queue thread processing, add req to main thread */
@@ -771,14 +778,14 @@ static int nvmf_ns_rw_req(struct nvmf_request *req, off_t offset, size_t length,
 	struct nvme_ns *ns = ctrl->ns;
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	memset(cmd, 0, sizeof(*cmd));
 	cmd->rw.opcode = is_write ? nvme_cmd_write : nvme_cmd_read;
 	cmd->rw.nsid = htole32(ns->nsid);
 	cmd->rw.slba = htole64(offset >> ns->lbads);
 	cmd->rw.length = htole64((length >> ns->lbads) - 1);
-	cmd->rw.control = htole16(0);	/* TODO FUA support */
-	cmd->rw.dsmgmt = htole32(0);	/* TODO dsmgmt supporte */
+	cmd->rw.control = htole16(0);    /* TODO FUA support */
+	cmd->rw.dsmgmt = htole32(0);    /* TODO dsmgmt supporte */
 
 	return ret;
 }
@@ -791,7 +798,7 @@ static nvmf_req_t nvmf_ns_rw_async(struct nvmf_queue *queue, struct iovec *iovs,
 	struct nvmf_ctrl *ctrl = queue->ctrl;
 	size_t length = nvmf_iov_datalen(iovs, iovcnt);
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return NULL;
@@ -819,6 +826,7 @@ static int nvmf_ns_rw_sync(struct nvmf_queue *queue, void *buf, size_t count, of
                            void *opaque)
 {
 	int ret;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_request *req;
 	struct nvme_completion *cqe;
 
@@ -830,8 +838,8 @@ static int nvmf_ns_rw_sync(struct nvmf_queue *queue, void *buf, size_t count, of
 
 	cqe = req->cqe;
 	if (cqe->status != NVME_SC_SUCCESS) {
-		log_error("ns %s error, status 0x%x\n", is_write ? "write" : "read",
-                          le16toh(cqe->status));
+		log_error(ctrl, "ns %s error, status 0x%x\n", is_write ? "write" : "read",
+	              le16toh(cqe->status));
 		ret = -EIO;
 	}
 
@@ -951,7 +959,7 @@ static int nvmf_ns_discard_req(struct nvmf_request *req, unsigned int segments)
 	struct nvme_ns *ns = ctrl->ns;
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	memset(cmd, 0, sizeof(*cmd));
 	cmd->dsm.opcode = nvme_cmd_dsm;
 	cmd->dsm.nsid = htole32(ns->nsid);
@@ -968,14 +976,14 @@ static void nvmf_ns_discard_cb(struct nvmf_request *req, void *opaque)
 	struct iovec *dsmiovec = (struct iovec *)opaque;
 	struct nvme_dsm_range *range = (struct nvme_dsm_range *)dsmiovec->iov_base;
 
-	log_trace();
-    if (cqe->status != NVME_SC_SUCCESS) {
-        log_error("discard failed, queue[%d]tag[0x%x], rw error, status 0x%x, lba[%lu, %d]\n",
-            req->queue->qid, req->tag, le16toh(cqe->status),
-            le32toh(range->slba), le32toh(range->nlb));
+	log_trace(ctrl);
+	if (cqe->status != NVME_SC_SUCCESS) {
+		log_error(ctrl, "discard failed, queue[%d]tag[0x%x], rw error, status 0x%x,"
+		          "lba[%lu, %d]\n", req->queue->qid, req->tag, le16toh(cqe->status),
+		          le32toh(range->slba), le32toh(range->nlb));
 	} else {
-		log_debug("discard succ, queue[%d]tag[0x%x], discard succeed, lba[%lu, %d]\n",
-            req->queue->qid, req->tag, le32toh(range->slba), le32toh(range->nlb));
+		log_debug(ctrl, "discard succ, queue[%d]tag[0x%x], discard succeed, lba[%lu, %d]\n",
+		          req->queue->qid, req->tag, le32toh(range->slba), le32toh(range->nlb));
 	}
 
 	nvmf_free(dsmiovec->iov_base);
@@ -999,7 +1007,7 @@ static nvmf_req_t nvmf_ns_discard_async(struct nvmf_queue *queue, struct iovec *
 	int lbads = ctrl->ns->lbads;
 	int i;
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return NULL;
@@ -1061,16 +1069,16 @@ static int nvmf_ns_writezeroes_req(struct nvmf_request *req, off_t offset, size_
 	struct nvme_command *cmd = req->cmd;
 	struct nvmf_ctrl *ctrl = req->queue->ctrl;
 	struct nvme_ns *ns = ctrl->ns;
-    int lbads = ctrl->ns->lbads;
+	int lbads = ctrl->ns->lbads;
 	int ret = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	memset(cmd, 0, sizeof(*cmd));
-        cmd->write_zeroes.opcode = nvme_cmd_write_zeroes;
-        cmd->write_zeroes.nsid = htole32(ns->nsid);
-        cmd->write_zeroes.slba = htole64(offset >> lbads);
-        cmd->write_zeroes.length = htole16((length >> lbads) - 1);
-        cmd->write_zeroes.control = 0;
+	cmd->write_zeroes.opcode = nvme_cmd_write_zeroes;
+	cmd->write_zeroes.nsid = htole32(ns->nsid);
+	cmd->write_zeroes.slba = htole64(offset >> lbads);
+	cmd->write_zeroes.length = htole16((length >> lbads) - 1);
+	cmd->write_zeroes.control = 0;
 
 	return ret;
 }
@@ -1084,7 +1092,7 @@ nvmf_req_t nvmf_writezeroes_async(nvmf_ctrl_t ctrl, int qid, struct iovec *iovs,
 	struct nvmf_request *req;
 	size_t length = nvmf_iov_datalen(iovs, iovcnt);
 
-	log_trace();
+	log_trace(ctrl);
 	if (qid >= __ctrl->opts->nr_queues) {
 		return NULL;
 	}
@@ -1121,7 +1129,7 @@ struct nvmf_request *nvmf_keepalive_async(struct nvmf_queue *queue,
 	struct nvme_command *cmd;
 	struct nvmf_ctrl *ctrl = queue->ctrl;
 
-	log_trace();
+	log_trace(ctrl);
 	req = nvmf_ctrl_alloc_request(ctrl, queue);
 	if (!req) {
 		return NULL;

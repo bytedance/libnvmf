@@ -37,7 +37,7 @@ void nvmf_malloc_init(void)
 
 	logfd = open(path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
 	if (logfd < 0) {
-		log_error("open logfd %s failed, %m", path);
+		log_error(ctrl, "open logfd %s failed, %m", path);
 	}
 
 	return;
@@ -49,7 +49,7 @@ void nvmf_malloc_init(void)
 	if (logfd > 0) {	\
 		len = snprintf(str, sizeof(str), "%c %p %s %d\n", op, ptr, file, line);	\
 		if (write(logfd, str, len) < 0)	\
-			log_error("write logfd failed, %m");	\
+			log_error(ctrl, "write logfd failed, %m");	\
 	}	\
 } while (0)
 

@@ -9,43 +9,49 @@
 #include <assert.h>
 #include <stdarg.h>
 
-static void log_to_stderr(int log_level, const char *message)
+#include "nvmf-private.h"
+
+/* log to stderr by default */
+void nvmf_default_log_fn(int log_level, const char *message)
 {
     fprintf(stderr, message);
 }
 
 const char *log_level_tag[] = {"ERROR", "WARN", "DEBUG"};
-int g_log_level = LOG_LEVEL_ERROR;
-nvmf_log_fn g_log_fn = log_to_stderr;
 __thread char thread_name_buff[17] = {0};
 __thread const char *thread_name = NULL;
 
-void set_log_level(int log_level)
+void nvmf_options_set_log_level(nvmf_options_t opts, int log_level)
 {
     assert(log_level >= LOG_LEVEL_ERROR);
     assert(log_level <= LOG_LEVEL_DEBUG);
-    g_log_level = log_level;
+    struct nvmf_ctrl_options *__opts = (struct nvmf_ctrl_options *)opts;
+    __opts->log_level = log_level;
 }
 
-void nvmf_set_log_fn(nvmf_log_fn fn)
+void nvmf_options_set_log_fn(nvmf_options_t opts, nvmf_log_fn fn)
 {
-    g_log_fn = fn;
+    struct nvmf_ctrl_options *__opts = (struct nvmf_ctrl_options *)opts;
+    __opts->log_fn = fn;
 }
 
-void nvmf_log_message(int log_level, const char *fmt, ...)
+void nvmf_log_message(nvmf_ctrl_t ctrl, int log_level, const char *fmt, ...)
 {
-    if (!g_log_fn) {
+    struct nvmf_ctrl *__ctrl = (struct nvmf_ctrl *)ctrl;
+    struct nvmf_ctrl_options *opts = __ctrl->opts;
+    if (!opts->log_fn || log_level > opts->log_level) {
         return;
     }
-    va_list ap;
-    static char message[MAX_LOG_BUFFER];
+
+    char message[MAX_LOG_BUFFER];
     int ret;
 
+    va_list ap;
     va_start(ap, fmt);
     ret = vsnprintf(message, MAX_LOG_BUFFER, fmt, ap);
     va_end(ap);
     if (unlikely(ret < 0)) {
         return;
     }
-    g_log_fn(log_level, message);
+    opts->log_fn(log_level, message);
 }

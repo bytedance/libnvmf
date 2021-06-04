@@ -38,6 +38,7 @@ struct nvmf_request *nvmf_queue_req_by_tag(struct nvmf_queue *queue, __u16 tag)
 
 static inline void nvmf_queue_kick(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	uint64_t u = 1;
 
 	/* kick queue thread if running in idle state */
@@ -46,7 +47,7 @@ static inline void nvmf_queue_kick(struct nvmf_queue *queue)
 	}
 
 	if (write(queue->eventfd, &u, sizeof(u)) < 0) {
-		log_error("queue[%d]kick failed, %m\n", queue->qid);
+		log_error(ctrl, "queue[%d]kick failed, %m\n", queue->qid);
 	}
 }
 
@@ -86,11 +87,12 @@ retry:
 
 static int nvmf_queue_handle_event(struct nvmf_queue *queue, short event)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct llist_node *works;
 	struct nvmf_queue_work *work, *tmp;
 	uint64_t u = 0;
 
-	log_trace();
+	log_trace(ctrl);
 	/* clear eventfd */
 	read(queue->eventfd, &u, sizeof(u));
 
@@ -101,7 +103,7 @@ static int nvmf_queue_handle_event(struct nvmf_queue *queue, short event)
 		pthread_mutex_lock(&work->mutex);
 		work->done = true;
 		pthread_mutex_unlock(&work->mutex);
-        pthread_cond_signal(&work->wait);
+		pthread_cond_signal(&work->wait);
 	}
 
 	return 0;
@@ -116,10 +118,11 @@ int nvmf_queue_timer_new(struct nvmf_queue *queue,
                          void (*func)(struct nvmf_queue_timer *timer, void *arg), void *arg,
                          uint64_t timeout_ms)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	uint64_t now = nvmf_now_ms();
 	struct nvmf_queue_timer *timer;
 
-	log_trace();
+	log_trace(ctrl);
 	timer = (struct nvmf_queue_timer *)nvmf_calloc(1, sizeof(*timer));
 	assert(timer);
 
@@ -141,10 +144,11 @@ void nvmf_queue_timer_mod(struct nvmf_queue_timer *timer, uint64_t timeout_ms)
 
 static void nvmf_queue_handle_timer(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_queue_timer *timer, *tmp;
 	uint64_t now = nvmf_now_ms();
 
-	log_trace();
+	log_trace(ctrl);
 	list_for_each_entry_safe(timer, tmp, &queue->timers, node) {
 		if (now <= timer->expired) {
 			continue;
@@ -161,9 +165,10 @@ static void nvmf_queue_handle_timer(struct nvmf_queue *queue)
 
 static void nvmf_queue_clear_timer(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_queue_timer *timer, *tmp;
 
-	log_trace();
+	log_trace(ctrl);
 	list_for_each_entry_safe(timer, tmp, &queue->timers, node) {
 		list_del(&timer->node);
 		nvmf_free(timer);
@@ -173,9 +178,10 @@ static void nvmf_queue_clear_timer(struct nvmf_queue *queue)
 int nvmf_queue_set_error(void *arg)
 {
 	struct nvmf_queue *queue = (struct nvmf_queue *)arg;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_pfd *pfd, *tmp;
 
-	log_debug("queue[%d]set error state\n", queue->qid);
+	log_debug(ctrl, "queue[%d]set error state\n", queue->qid);
 	nvmf_queue_state_set(queue, QUEUE_STATE_ERROR);
 
 	/* clear all pfds, re-set control event */
@@ -184,7 +190,7 @@ int nvmf_queue_set_error(void *arg)
 			continue;
 		}
 
-		log_debug("queue[%d]remove pfd fd[%d]\n", queue->qid, pfd->pfd.fd);
+		log_debug(ctrl, "queue[%d]remove pfd fd[%d]\n", queue->qid, pfd->pfd.fd);
 		list_del(&pfd->node);
 		nvmf_free(pfd);
 	}
@@ -194,9 +200,10 @@ int nvmf_queue_set_error(void *arg)
 
 void nvmf_queue_retransfer_save(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_request *req, *tmp;
 
-	log_debug("queue[%d]save request, nr_inflight %d\n", queue->qid, queue->nr_inflight);
+	log_debug(ctrl, "queue[%d]save request, nr_inflight %d\n", queue->qid, queue->nr_inflight);
 	list_for_each_entry_safe(req, tmp, &queue->inflight, node) {
 		list_del(&req->node);
 		list_add_tail(&req->node, &queue->retransfer);
@@ -211,9 +218,11 @@ void nvmf_queue_retransfer_save(struct nvmf_queue *queue)
 
 void nvmf_queue_retransfer_restore(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_request *req, *tmp;
 
-	log_debug("queue[%d]restore request, nr_inflight %d\n", queue->qid, queue->nr_inflight);
+	log_debug(ctrl, "queue[%d]restore request, nr_inflight %d\n",
+              queue->qid, queue->nr_inflight);
 	list_for_each_entry_safe(req, tmp, &queue->retransfer, node) {
 		list_del(&req->node);
 		llist_add(&req->llist, &queue->queueing);
@@ -225,7 +234,7 @@ static void nvmf_kato_cb(unsigned short status, void *opaque)
 	struct nvmf_queue *queue = (struct nvmf_queue *)opaque;
 	struct nvmf_ctrl *ctrl = queue->ctrl;
 
-	log_debug("kato cb status %d\n", status);
+	log_debug(ctrl, "kato cb status %d\n", status);
 
 	nvmf_ctrl_free_request(ctrl, ctrl->kato_req);
 	ctrl->kato_req = NULL;
@@ -237,10 +246,10 @@ static void nvmf_ctrl_kato_work(struct nvmf_queue_timer *timer, void *arg)
 	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_request *req;
 
-	log_trace();
+	log_trace(ctrl);
 	if (ctrl->kato_req) {
 		/* don't free kato_req, to retry again */
-		log_error("previous KATO expired\n");
+		log_error(ctrl, "previous KATO expired\n");
 		nvmf_ctrl_set_reset(ctrl, true);
 		nvmf_ctrl_kick(ctrl);
 		nvmf_queue_timer_mod(timer, ctrl->opts->kato);
@@ -305,7 +314,7 @@ static void nvmf_queue_thread_setname(struct nvmf_queue *queue)
 	 * set thread name
 	 * nvmf-SHORTNQN[last 7 bytes of NQN]-QID[2 bytes]
 	 */
-#define SHORTNQNLEN	7
+#define SHORTNQNLEN    7
 	len = strlen(ctrl->opts->trnqn);
 	if (len >= SHORTNQNLEN) {
 		offset = len - SHORTNQNLEN;
@@ -387,16 +396,17 @@ static bool nvmf_queue_should_stop(struct nvmf_queue *queue)
 	return queue->should_stop;
 }
 
-#define HZ		1000
-#define TICK		(1000 / HZ)
+#define HZ        1000
+#define TICK        (1000 / HZ)
 
 static void nvmf_queue_pollfds(struct nvmf_queue *queue)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	struct nvmf_pfd *pfd;
 	struct pollfd pfds[PFDMAX], *dstpfd;
 	int ret, i, nr_pfds;
 
-	log_trace();
+	log_trace(ctrl);
 
 	/* try to send all pending requests */
 	if (!nvmf_queue_is_idle(queue)) {
@@ -413,8 +423,8 @@ static void nvmf_queue_pollfds(struct nvmf_queue *queue)
 	nvmf_queue_state_set(queue, QUEUE_STATE_IDLE);
 	ret = poll(pfds, nr_pfds, TICK);
 	if (ret < 0) {
-	    assert(errno == EINTR);
-		log_error("queue[%d] poll error: %m", queue->qid);
+		assert(errno == EINTR);
+		log_error(ctrl, "queue[%d] poll error: %m", queue->qid);
 		return;
 	}
 
@@ -458,10 +468,11 @@ static void nvmf_queue_pollfds(struct nvmf_queue *queue)
 int nvmf_queue_do_req(struct nvmf_request *req)
 {
 	struct nvmf_queue *queue = req->queue;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	unsigned long start = nvmf_now_ms(), now;
 	unsigned long timeout = req->timeout;
 
-	log_trace();
+	log_trace(ctrl);
 	while (true) {
 		nvmf_queue_pollfds(queue);
 		if (req->done) {
@@ -486,9 +497,10 @@ int nvmf_queue_do_req(struct nvmf_request *req)
 /* sync API, this API can be called only from queue thread context */
 int nvmf_queue_wait_state(struct nvmf_queue *queue, int state, int timeout_ms)
 {
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	unsigned long start = nvmf_now_ms(), now;
 
-	log_trace();
+	log_trace(ctrl);
 	while (true) {
 		nvmf_queue_pollfds(queue);
 		if (queue->state == state) {
@@ -509,9 +521,10 @@ int nvmf_queue_wait_state(struct nvmf_queue *queue, int state, int timeout_ms)
 static void *nvmf_queue_thread(void *arg)
 {
 	struct nvmf_queue *queue = (struct nvmf_queue *)arg;
+	struct nvmf_ctrl *ctrl = queue->ctrl;
 	nvmf_queue_thread_setname(queue);
 
-	log_trace();
+	log_trace(ctrl);
 	/* always initilize event controll fd */
 	nvmf_queue_set_event(queue, queue->eventfd, nvmf_queue_handle_event, NULL);
 
@@ -520,10 +533,10 @@ static void *nvmf_queue_thread(void *arg)
 
 		nvmf_queue_handle_timer(queue);
 
-		log_trace();
+		log_trace(ctrl);
 	} while (!nvmf_queue_should_stop(queue));
 
-	log_debug("queue[%d]dying\n", queue->qid);
+	log_debug(ctrl, "queue[%d]dying\n", queue->qid);
 	nvmf_queue_set_event(queue, queue->eventfd, NULL, NULL);
 	close(queue->eventfd);
 
@@ -553,7 +566,7 @@ int nvmf_queue_call_function(struct nvmf_queue *queue, int (*func)(void *arg), v
 
 	pthread_mutex_lock(&work.mutex);
 	while (!work.done) {
-        pthread_cond_wait(&work.wait, &work.mutex);
+		pthread_cond_wait(&work.wait, &work.mutex);
 	}
 	pthread_mutex_unlock(&work.mutex);
 
