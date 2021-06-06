@@ -8,7 +8,7 @@
 #include "types.h"
 #include "nvme.h"
 #include "nvme-tcp.h"
-#include "nvmf.h"
+#include "nvmf/nvmf.h"
 #include "nvmf-private.h"
 
 int main(int argc, char *argv[])

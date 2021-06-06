@@ -3,7 +3,7 @@
  *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
  */
-#include "nvmf.h"
+#include "nvmf/nvmf.h"
 #include "utils.h"
 
 #include <assert.h>
