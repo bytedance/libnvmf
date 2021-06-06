@@ -14,7 +14,7 @@
 /* log to stderr by default */
 void nvmf_default_log_fn(int log_level, const char *message)
 {
-    fprintf(stderr, message);
+    fprintf(stderr, "%s", message);
 }
 
 const char *log_level_tag[] = {"ERROR", "WARN", "DEBUG"};
