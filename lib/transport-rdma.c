@@ -40,8 +40,6 @@ struct nvmf_rdma_queue {
 	unsigned int cq_events;
 	struct ibv_mr *cqe_mr;
 	struct nvme_completion *cqes;
-	struct ibv_sge *cqe_sges;
-	struct ibv_recv_wr *recv_wrs;
 
 	size_t cmnd_capsule_len;
 
@@ -52,11 +50,7 @@ struct nvmf_rdma_queue {
 	struct ibv_mr *data_mr;
 };
 
-#define SGE_CMD        0
-#define SGE_INCAPSULE    1
 struct nvmf_rdma_priv {
-	/* sges[0] for cmd, sges[1] for incapsule data */
-	struct ibv_sge sges[2];
 	struct nvme_command cmd;
 	struct nvme_completion cqe;
 	size_t data_size;
@@ -67,6 +61,23 @@ struct nvmf_rdma_priv {
 	 */
 	struct ibv_mr *data_mr;
 };
+
+static int nvmf_rdma_recv_cqe(struct nvmf_rdma_queue *rdma_queue, struct nvme_completion *cqe)
+{
+	struct ibv_recv_wr recv_wr = {0}, *bad_wr;
+	struct ibv_sge sge;
+
+	sge.addr = (uint64_t)cqe;
+	sge.length = sizeof(struct nvme_completion);
+	sge.lkey = rdma_queue->cqe_mr->lkey;
+
+	recv_wr.next = NULL;
+	recv_wr.wr_id = (uintptr_t)cqe;
+	recv_wr.sg_list = &sge;
+	recv_wr.num_sge = 1;
+
+	return ibv_post_recv(rdma_queue->qp, &recv_wr, &bad_wr);
+}
 
 static int nvmf_rdma_cq_handle_recv(struct nvmf_queue *queue, struct nvmf_rdma_queue *rdma_queue,
 				                    struct nvme_completion *cqe)
@@ -113,8 +124,8 @@ static int nvmf_rdma_cq_handle_recv(struct nvmf_queue *queue, struct nvmf_rdma_q
 static int nvmf_rdma_cq_event_handler(struct nvmf_queue *queue, struct nvmf_rdma_queue *rdma_queue)
 {
 	struct ibv_wc wc;
-	struct ibv_recv_wr *bad_wr;
 	struct nvmf_ctrl *ctrl = queue->ctrl;
+	struct nvme_completion *cqe;
 
 	log_trace(ctrl);
 	while ((ibv_poll_cq(rdma_queue->cq, 1, &wc)) > 0) {
@@ -124,8 +135,8 @@ static int nvmf_rdma_cq_event_handler(struct nvmf_queue *queue, struct nvmf_rdma
 			continue;
 		} else if (wc.status != IBV_WC_SUCCESS) {
 			/* TODO reconnect */
-			log_error(ctrl, "queue[%d] status = 0x%x, opcode = 0x%x\n", queue->qid,
-				                  wc.status, wc.opcode);
+			log_error(ctrl, "queue[%d] status = 0x%x, opcode = 0x%x, wr_id = %p\n",
+			          queue->qid, wc.status, wc.opcode, (void *)wc.wr_id);
 			return -1;
 		}
 
@@ -134,19 +145,16 @@ static int nvmf_rdma_cq_event_handler(struct nvmf_queue *queue, struct nvmf_rdma
 			log_debug(ctrl, "send completion\n");
 			break;
 		case IBV_WC_RECV:
-			nvmf_rdma_cq_handle_recv(queue, rdma_queue,
-                                     (struct nvme_completion *)wc.wr_id);
+			cqe = (struct nvme_completion *)wc.wr_id;
+			nvmf_rdma_cq_handle_recv(queue, rdma_queue, cqe);
+			if (nvmf_rdma_recv_cqe(rdma_queue, cqe)) {
+				log_error(ctrl, "queue[%d] ibv_post_recv failed, %m\n",
+				          rdma_queue->queue->qid);
+				return -errno;
+			}
 			break;
 		default:
 			break;
-		}
-	}
-
-	if (ibv_post_recv(rdma_queue->qp, rdma_queue->recv_wrs, &bad_wr)) {
-		if (errno != EAGAIN) {
-			/* TODO reconnect */
-			log_error(ctrl, "queue[%d] ibv_post_recv failed, %m\n",
-			          rdma_queue->queue->qid);
 		}
 	}
 
@@ -265,7 +273,7 @@ static int nvmf_rdma_queue_route_handler(struct nvmf_rdma_queue *rdma_queue,
 	init_attr.qp_context = (void *)rdma_queue->cm_id->context;
 	init_attr.send_cq = rdma_queue->cq;
 	init_attr.recv_cq = rdma_queue->cq;
-	init_attr.cap.max_send_wr = 3 * rdma_queue->queue->qsize + 1;
+	init_attr.cap.max_send_wr = 2 * rdma_queue->queue->qsize + 1;
 	init_attr.cap.max_recv_wr = rdma_queue->queue->qsize + 1;
 	init_attr.cap.max_send_sge = 2;
 	init_attr.cap.max_recv_sge = 2;
@@ -308,34 +316,6 @@ static int nvmf_rdma_queue_established_handler(struct nvmf_rdma_queue *rdma_queu
 	return 0;
 }
 
-static char *nvmf_rdma_cma_event_str(int event)
-{
-	static char *e[] = {
-		"RDMA_CM_EVENT_ADDR_RESOLVED",
-		"RDMA_CM_EVENT_ADDR_ERROR",
-		"RDMA_CM_EVENT_ROUTE_RESOLVED",
-		"RDMA_CM_EVENT_ROUTE_ERROR",
-		"RDMA_CM_EVENT_CONNECT_REQUEST",
-		"RDMA_CM_EVENT_CONNECT_RESPONSE",
-		"RDMA_CM_EVENT_CONNECT_ERROR",
-		"RDMA_CM_EVENT_UNREACHABLE",
-		"RDMA_CM_EVENT_REJECTED",
-		"RDMA_CM_EVENT_ESTABLISHED",
-		"RDMA_CM_EVENT_DISCONNECTED",
-		"RDMA_CM_EVENT_DEVICE_REMOVAL",
-		"RDMA_CM_EVENT_MULTICAST_JOIN",
-		"RDMA_CM_EVENT_MULTICAST_ERROR",
-		"RDMA_CM_EVENT_ADDR_CHANGE",
-		"RDMA_CM_EVENT_TIMEWAIT_EXIT",
-	};
-
-	if (event >= ARRAY_SIZE(e)) {
-		return "RDMA_UNKOWN";
-	} else {
-		return e[event];
-	}
-}
-
 static int nvmf_rdma_cma_handler(struct nvmf_rdma_queue *rdma_queue, struct rdma_cm_id *cm_id,
                                  struct rdma_cm_event *event)
 {
@@ -343,7 +323,7 @@ static int nvmf_rdma_cma_handler(struct nvmf_rdma_queue *rdma_queue, struct rdma
 	int ret = 0;
 
 	log_debug(ctrl, "queue[%d] handle cma event %d (%s), status %d\n", rdma_queue->queue->qid,
-              event->event, nvmf_rdma_cma_event_str(event->event), event->status);
+              event->event, rdma_event_str(event->event), event->status);
 	switch (event->event) {
 	case RDMA_CM_EVENT_ADDR_RESOLVED:
 		ret = nvmf_rdma_queue_addr_handler(rdma_queue, cm_id);
@@ -361,7 +341,7 @@ static int nvmf_rdma_cma_handler(struct nvmf_rdma_queue *rdma_queue, struct rdma
 	case RDMA_CM_EVENT_REJECTED:
 		log_error(ctrl, "queue[%d] handle cma event %d (%s), status %d\n",
 		          rdma_queue->queue->qid, event->event,
-		          nvmf_rdma_cma_event_str(event->event), event->status);
+		          rdma_event_str(event->event), event->status);
 		ret = -1;
 		break;
 	case RDMA_CM_EVENT_DISCONNECTED:
@@ -370,7 +350,7 @@ static int nvmf_rdma_cma_handler(struct nvmf_rdma_queue *rdma_queue, struct rdma
 		rdma_queue->queue->state = QUEUE_STATE_DYING;
 		log_debug(ctrl, "queue[%d] handle cma event %d (%s), status %d\n",
 		          rdma_queue->queue->qid, event->event,
-		          nvmf_rdma_cma_event_str(event->event), event->status);
+		          rdma_event_str(event->event), event->status);
 		ret = -1;
 		break;
 	default:
@@ -477,8 +457,6 @@ static int nvmf_rdma_queue_buffer_setup(struct nvmf_rdma_queue *rdma_queue)
 {
 	struct nvmf_queue *queue = rdma_queue->queue;
 	struct nvmf_ctrl *ctrl = queue->ctrl;
-	struct ibv_recv_wr *recv_wr = NULL, *bad_wr;
-	struct ibv_sge *sge;
 	struct nvme_completion *cqe;
 	void *addr;
 	size_t length;
@@ -487,7 +465,7 @@ static int nvmf_rdma_queue_buffer_setup(struct nvmf_rdma_queue *rdma_queue)
 
 	/* reg a single MR for all the cmd */
 	addr = slab_base(rdma_queue->slab_priv);
-	length = sizeof(struct nvmf_rdma_priv) * queue->qsize;
+	length = slab_size(rdma_queue->slab_priv) * slab_objects(rdma_queue->slab_priv);
 	access = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ;
 	rdma_queue->cmd_mr = ibv_reg_mr(rdma_queue->pd, addr, length, access);
 	if (!rdma_queue->cmd_mr) {
@@ -524,32 +502,13 @@ static int nvmf_rdma_queue_buffer_setup(struct nvmf_rdma_queue *rdma_queue)
 	}
 	log_debug(ctrl, "queue[%d]cqe mr LKEY[%x], RKEY[%x], base %p, size %ld\n", queue->qid,
 	          rdma_queue->cqe_mr->lkey, rdma_queue->cqe_mr->rkey, addr, length);
-	rdma_queue->cqe_sges = (struct ibv_sge *)nvmf_calloc(sizeof(struct ibv_sge), queue->qsize);
-	rdma_queue->recv_wrs = (struct ibv_recv_wr *)nvmf_calloc(sizeof(struct ibv_recv_wr),
-	                                                         queue->qsize);
 
 	for (i = 0; i < rdma_queue->queue->qsize; i++) {
 		cqe = rdma_queue->cqes + i;
-		sge = rdma_queue->cqe_sges + i;
-		sge->addr = (uint64_t)cqe;
-		sge->length = sizeof(*cqe);
-		sge->lkey = rdma_queue->cqe_mr->lkey;
-
-		recv_wr = rdma_queue->recv_wrs + i;
-		recv_wr->next = recv_wr + 1;
-		recv_wr->wr_id = (uintptr_t)cqe;
-		recv_wr->sg_list = sge;
-		recv_wr->num_sge = 1;
-	}
-
-	if (recv_wr) {
-		recv_wr->next = NULL;
-	}
-
-	if (ibv_post_recv(rdma_queue->qp, rdma_queue->recv_wrs, &bad_wr)) {
-		if (errno != EAGAIN) {
+		if (nvmf_rdma_recv_cqe(rdma_queue, cqe)) {
 			log_error(ctrl, "queue[%d] ibv_post_recv failed, %m\n",
 			          rdma_queue->queue->qid);
+			return -errno;
 		}
 	}
 
@@ -706,14 +665,6 @@ static int nvmf_rdma_release_queue(struct nvmf_queue *queue)
 		nvmf_free(rdma_queue->cqes);
 	}
 
-	if (rdma_queue->cqe_sges) {
-		nvmf_free(rdma_queue->cqe_sges);
-	}
-
-	if (rdma_queue->recv_wrs) {
-		nvmf_free(rdma_queue->recv_wrs);
-	}
-
 	if (rdma_queue->slab_priv) {
 		slab_destroy(rdma_queue->slab_priv);
 	}
@@ -815,13 +766,13 @@ static inline int nvme_rdma_set_sg_null(struct nvmf_ctrl *ctrl, struct nvme_comm
 }
 
 static inline int nvme_rdma_set_sg_incapsule(struct nvmf_ctrl *ctrl,
-                                             struct nvmf_request *req,
-                                             struct nvmf_rdma_queue *rdma_queue,
-                                             struct nvme_command *cmd, __u32 bufflen)
+					     struct nvmf_request *req,
+					     struct nvmf_rdma_queue *rdma_queue,
+					     struct nvme_command *cmd, __u32 bufflen,
+					     struct ibv_sge *sge)
 {
 	struct nvme_sgl_desc *sg = &cmd->common.dptr.sgl;
 	struct nvmf_rdma_priv *priv = (struct nvmf_rdma_priv *)req->priv;
-	struct ibv_sge *sge = &priv->sges[SGE_INCAPSULE];
 	struct ibv_mr *data_mr = rdma_queue->data_mr;
 
 	if (priv->data_mr) {
@@ -871,7 +822,7 @@ static inline int nvme_rdma_set_sg_host_data(struct nvmf_ctrl *ctrl,
 }
 
 static inline int nvmf_rdma_map_data(struct nvmf_request *req, struct nvmf_rdma_queue *rdma_queue,
-                                     size_t data_len)
+                                     size_t data_len, struct ibv_sge *sge)
 {
 	struct nvmf_ctrl *ctrl = rdma_queue->queue->ctrl;
 	struct nvme_command *cmd = req->cmd;
@@ -883,7 +834,7 @@ static inline int nvmf_rdma_map_data(struct nvmf_request *req, struct nvmf_rdma_
 	if (!data_len) {
 		ret = nvme_rdma_set_sg_null(ctrl, cmd);
 	} else if (is_write && data_len <= nvme_rdma_incapsule_size(rdma_queue)) {
-		ret = nvme_rdma_set_sg_incapsule(ctrl, req, rdma_queue, cmd, data_len);
+		ret = nvme_rdma_set_sg_incapsule(ctrl, req, rdma_queue, cmd, data_len, sge);
 	} else {
 		ret = nvme_rdma_set_sg_host_data(ctrl, req, rdma_queue, cmd);
 	}
@@ -905,11 +856,14 @@ static int nvmf_rdma_queue_request(struct nvmf_request *req, struct iovec *iovs,
 	return 0;
 }
 
+#define SGE_CMD			0
+#define SGE_INCAPSULE		1
+/* sges[0] for cmd, sges[1] for incapsule data */
 static int nvmf_rdma_queue_send(struct nvmf_queue *queue)
 {
 	struct nvmf_request *req;
 	struct nvmf_rdma_priv *priv;
-	struct ibv_sge *sge;
+	struct ibv_sge *sge, sges[2];
 	struct ibv_send_wr send_wr, *bad_wr;
 	struct nvmf_rdma_queue *rdma_queue = (struct nvmf_rdma_queue *)queue->priv;
 	struct nvmf_ctrl *ctrl = queue->ctrl;
@@ -927,7 +881,7 @@ static int nvmf_rdma_queue_send(struct nvmf_queue *queue)
 		priv = (struct nvmf_rdma_priv *)req->priv;
 
 		/* build cmd sge */
-		sge = &priv->sges[SGE_CMD];
+		sge = &sges[SGE_CMD];
 		sge->addr = (uint64_t)&priv->cmd;
 		sge->length = sizeof(priv->cmd);
 		sge->lkey = rdma_queue->cmd_mr->lkey;
@@ -948,12 +902,13 @@ static int nvmf_rdma_queue_send(struct nvmf_queue *queue)
 			nvmf_iov_to_buf(req->iovs, req->iovcnt, priv->data);
 		}
 
-		another_sge = nvmf_rdma_map_data(req, rdma_queue, priv->data_size);
+		sge = &sges[SGE_INCAPSULE];
+		another_sge = nvmf_rdma_map_data(req, rdma_queue, priv->data_size, sge);
 
 		memset(&send_wr, 0, sizeof(send_wr));
 		send_wr.next = NULL;
 		send_wr.wr_id = (uintptr_t)req;
-		send_wr.sg_list = &priv->sges[0];
+		send_wr.sg_list = sges;
 		send_wr.num_sge = 1 + another_sge;
 		send_wr.opcode = IBV_WR_SEND;
 		send_wr.send_flags = IBV_SEND_SIGNALED;
