@@ -14,5 +14,7 @@ void *slab_alloc(slab_t slab);
 void slab_free(slab_t slab, void *addr);
 int slab_index(slab_t slab, void *addr);
 void *slab_base(slab_t slab);
+unsigned int slab_size(slab_t slab);
+unsigned int slab_objects(slab_t slab);
 
 #endif

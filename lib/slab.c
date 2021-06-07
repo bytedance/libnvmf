@@ -139,3 +139,17 @@ void *slab_base(slab_t slab)
 
 	return __slab->base;
 }
+
+unsigned int slab_size(slab_t slab)
+{
+	struct slab_s *__slab = (struct slab_s *)slab;
+
+	return __slab->size;
+}
+
+unsigned int slab_objects(slab_t slab)
+{
+	struct slab_s *__slab = (struct slab_s *)slab;
+
+	return __slab->objects;
+}
