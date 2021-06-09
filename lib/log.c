@@ -1,9 +1,12 @@
 /*
- * Copyright 2020-2021 helei.sig11
+ * Copyright 2021 helei.sig11
+ *
+ * Authors:
+ *   helei.sig11
  *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
  */
-
 #include "log.h"
 
 #include <assert.h>

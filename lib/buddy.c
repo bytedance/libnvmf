@@ -1,7 +1,11 @@
 /*
  * Copyright 2020-2021 zhenwei pi
  *
+ * Authors:
+ *   zhenwei pi
+ *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
  */
 #include <stdlib.h>
 #include <assert.h>
@@ -23,6 +27,7 @@ struct buddy {
 #define IS_POWER_OF_2(x)	(!((x) & ((x) - 1)))
 #define MAX(a, b)		((a) > (b) ? (a) : (b))
 
+/* for debug purpose, re-define them by nvmf_malloc/nvmf_free */
 #define MALLOC malloc
 #define FREE free
 
