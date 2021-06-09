@@ -1,4 +1,5 @@
 #!/usr/bin/env perl
+# taken from linux, modified by zhenwei pi
 # (c) 2001, Dave Jones. (the file handling bit)
 # (c) 2005, Joel Schopp <jschopp@austin.ibm.com> (the ugly bit)
 # (c) 2007,2008, Andy Whitcroft <apw@uk.ibm.com> (new conditions, test suite)

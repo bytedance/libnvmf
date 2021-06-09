@@ -1,7 +1,14 @@
 /*
+ * Lockless-list implemention. To make APIs easy to use, keep the same coding
+ * style with linux. Tested by libnvmf/examples/test-llist.c
+ *
  * Copyright 2020-2021 zhenwei pi
  *
+ * Authors:
+ *   zhenwei pi
+ *
  * This work is licensed under the terms of the GNU GPL, version 2 or later.
+ * See the COPYING file in the top-level directory.
  */
 #ifndef _LLIST_H_
 #define _LLIST_H_
