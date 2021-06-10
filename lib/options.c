@@ -13,6 +13,7 @@
 #include "log.h"
 #include "utils.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
@@ -215,4 +216,30 @@ void nvmf_options_set_io_queues(nvmf_options_t opts, unsigned int io_queues)
 	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
 
 	options->nr_queues = io_queues + 1;
+}
+
+void nvmf_options_set_log_level(nvmf_options_t opts, int log_level)
+{
+	assert(log_level >= LOG_LEVEL_ERROR);
+	assert(log_level <= LOG_LEVEL_DEBUG);
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+	options->log_level = log_level;
+}
+
+void nvmf_options_set_log_fn(nvmf_options_t opts, nvmf_log_fn fn)
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+	options->log_fn = fn;
+}
+
+void nvmf_options_set_tcp_hdr_digest(nvmf_options_t opts, bool enable_hdr_digest)
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+	options->hdr_digest = enable_hdr_digest;
+}
+
+void nvmf_options_set_tcp_data_digest(nvmf_options_t opts, bool enable_data_digest)
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+	options->data_digest = enable_data_digest;
 }

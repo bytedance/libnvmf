@@ -374,5 +374,6 @@ static inline void nvmf_queue_state_set(struct nvmf_queue *queue, int val)
 /* event API */
 int nvmf_event_do_req(struct nvmf_request *req);
 
+uint32_t crc32c(uint32_t crc, void const *buf, size_t len);
 
 #endif /* _LIBNVMF_PRIVATE_ */

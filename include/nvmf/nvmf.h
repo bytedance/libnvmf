@@ -11,6 +11,7 @@
 #define _LIBNVMF_NVMF_
 
 #include <sys/uio.h>
+#include <stdbool.h>
 
 typedef void *nvmf_ctrl_t;
 typedef void *nvmf_options_t;
@@ -29,6 +30,12 @@ void nvmf_options_set_io_queues(nvmf_options_t opts, unsigned int io_queues);
 void nvmf_options_set_log_level(nvmf_options_t opts, int level);
 
 void nvmf_options_set_log_fn(nvmf_options_t opts, nvmf_log_fn fn);
+
+/* options API for nvme over tcp */
+void nvmf_options_set_tcp_hdr_digest(nvmf_options_t opts, bool enable_hdr_dgst);
+
+void nvmf_options_set_tcp_data_digest(nvmf_options_t opts, bool enable_data_dgst);
+
 
 
 /* ctrl API */

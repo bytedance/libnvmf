@@ -209,6 +209,8 @@ int main(int argc, char *argv[])
 
 	nvmf_options_set_kato(options, 10000);
 	nvmf_options_set_io_queues(options, IOQUEUES);
+	nvmf_options_set_tcp_hdr_digest(options, true);
+	nvmf_options_set_tcp_data_digest(options, true);
 	nvmf_ctrl = nvmf_ctrl_create(options);
 	if (!nvmf_ctrl) {
 		printf("create src ctrl failed\n");

@@ -48,13 +48,15 @@ struct nvmf_tcp_queue {
 
 	__u8 hpda;    /* TODO, not support currently */
 	__u8 cpda;    /* TODO, not support currently */
-	char pad[64];
+	char pad[128];
 
 	/* slab for nvmf_tcp_priv */
 	slab_t slab_priv;
 
 	/* current processing request */
 	struct nvme_tcp_rsp_pdu rsppdu;
+	__le32 recv_hdr_digest;
+	__le32 exp_hdr_digest;
 
 	/* unlikely we have received a incomplete pdu */
 	size_t pdu_rwsize;
@@ -65,6 +67,9 @@ struct nvmf_tcp_queue {
 	struct iovec i_iovs[QUEUE_MAX_IOV];
 	size_t i_totalsize;
 	size_t i_rwsize;
+	struct iovec *data_iovs;
+	size_t data_iovcnt;
+	__le32 exp_data_digest;
 
 	/* current outputing request */
 	struct nvmf_request *o_req;
@@ -83,8 +88,8 @@ struct nvmf_tcp_priv {
 
 	bool incapsule;
 	/* header & data digest */
-	__le32 hdigest;
-	__le32 ddigest;
+	__le32 hdr_digest;
+	__le32 data_digest;
 	__u32 r2t_offset;
 	__u32 r2t_length;
 	__u32 c2h_offset;
@@ -104,12 +109,26 @@ static inline __u8 nvme_tcp_ddgst_len(struct nvmf_tcp_queue *tcp_queue)
 	return tcp_queue->data_digest ? NVME_TCP_DIGEST_LENGTH : 0;
 }
 
+static inline __le32 nvme_tcp_hdgst(void const *head, size_t len)
+{
+	return htole32(crc32c(0, head, len));
+}
+
+static inline __le32 nvme_tcp_ddgst(struct iovec *iovs, size_t iovcnt)
+{
+	int i;
+	uint32_t crc = 0;
+
+	for (i = 0; i < iovcnt; i++) {
+		crc = crc32c(crc, iovs[i].iov_base, iovs[i].iov_len);
+	}
+	return htole32(crc);
+}
 
 static inline size_t nvme_tcp_incapsule_size(struct nvmf_tcp_queue *tcp_queue)
 {
 	return tcp_queue->cmnd_capsule_len - sizeof(struct nvme_command);
 }
-
 
 static inline int nvmf_tcp_queue_id(struct nvmf_tcp_queue *tcp_queue)
 {
@@ -187,6 +206,8 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 		log_error(ctrl, "send icreq error, %m");
 		return ret;
 	}
+	log_debug(ctrl, "send icreq done, pfv=%d, hpda=%d, dgst=%d, maxr2t=%d\n",
+	          icreq.pfv, icreq.hpda, icreq.digest, icreq.maxr2t);
 
 	ret = recv(tcp_queue->sockfd, &icresp, sizeof(icresp), 0);
 	if (ret < 0) {
@@ -216,17 +237,19 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
 		return -EINVAL;
 	}
 
+	log_debug(ctrl, "recv icresp, cpda=%d, digest=%d, maxdata=%d\n",
+	          icresp.cpda, icresp.digest, icresp.maxdata);
 	data_digest = !!(icresp.digest & NVME_TCP_DATA_DIGEST_ENABLE);
 	if (tcp_queue->data_digest != data_digest) {
 		log_error(ctrl, "data digest error, queue %d: local: %c target: %c\n",
-				nvmf_tcp_queue_id(tcp_queue), tcp_queue->data_digest, data_digest);
+		          nvmf_tcp_queue_id(tcp_queue), tcp_queue->data_digest, data_digest);
 		return -EINVAL;
 	}
 
 	hdr_digest = !!(icresp.digest & NVME_TCP_HDR_DIGEST_ENABLE);
 	if (tcp_queue->hdr_digest != hdr_digest) {
 		log_error(ctrl, "header digest error, queue %d: local: %c target: %c\n",
-		          nvmf_tcp_queue_id(tcp_queue), tcp_queue->data_digest, data_digest);
+		          nvmf_tcp_queue_id(tcp_queue), tcp_queue->hdr_digest, hdr_digest);
 		return -EINVAL;
 	}
 
@@ -314,6 +337,8 @@ static int nvmf_tcp_create_queue(struct nvmf_queue *queue)
 
 	tcp_queue->queue = queue;
 	queue->priv = tcp_queue;
+	tcp_queue->hdr_digest = ctrl->opts->hdr_digest;
+	tcp_queue->data_digest = ctrl->opts->data_digest;
 	if (queue->qid == 0) {
 		tcp_queue->cmnd_capsule_len = sizeof(struct nvme_command) + NVME_TCP_ADMIN_CCSZ;
 		qsize = NVME_AQ_DEPTH;
@@ -455,13 +480,15 @@ static inline struct iovec *nvmf_tcp_req_iov(struct nvmf_request *req, int index
 	return priv->iovs + index;
 }
 
-static inline void nvmf_tcp_queue_clear_input(struct nvmf_tcp_queue *queue)
+static inline void nvmf_tcp_queue_clear_input(struct nvmf_tcp_queue *tcp_queue)
 {
-	queue->i_req = NULL;
-	queue->i_iovcnt = 0;
-	queue->i_totalsize = 0;
-	queue->i_rwsize = 0;
-	memset(queue->i_iovs, 0x00, sizeof(queue->i_iovs));
+	tcp_queue->i_req = NULL;
+	tcp_queue->i_iovcnt = 0;
+	tcp_queue->i_totalsize = 0;
+	tcp_queue->i_rwsize = 0;
+	tcp_queue->data_iovs = NULL;
+	tcp_queue->data_iovcnt = 0;
+	memset(tcp_queue->i_iovs, 0x00, sizeof(tcp_queue->i_iovs));
 }
 
 static inline void nvmf_tcp_queue_clear_output(struct nvmf_tcp_queue *queue)
@@ -541,7 +568,7 @@ static int nvmf_tcp_build_req(struct nvmf_request *req)
 	__u32 data_len;
 	__u32 pdu_len = 0;
 	__u8 hdgst = nvme_tcp_hdgst_len(tcp_queue);
-	__u8 ddgst = nvme_tcp_ddgst_len(tcp_queue);
+	__u8 ddgst = 0;
 	bool is_write = nvme_is_write(cmd);
 
 	data_len = nvmf_tcp_iov_datalen(req);
@@ -550,18 +577,23 @@ static int nvmf_tcp_build_req(struct nvmf_request *req)
 		priv->incapsule = true;
 	}
 
+	if (pdu_len) {
+		ddgst = nvme_tcp_ddgst_len(tcp_queue);
+	}
+
 	hdr->type = nvme_tcp_cmd;
 	hdr->flags = 0;
-	if (tcp_queue->hdr_digest) {
+	if (hdgst) {
 		hdr->flags |= NVME_TCP_F_HDGST;
 	}
 
-	if (tcp_queue->data_digest && req->iovcnt) {
+	if (ddgst) {
 		hdr->flags |= NVME_TCP_F_DDGST;
 	}
 
 	hdr->hlen = sizeof(struct nvme_tcp_cmd_pdu);
 	hdr->pdo = pdu_len ? hdr->hlen + hdgst : 0;
+	/* TODO: add cpda */
 	hdr->plen = htole32(hdr->hlen + hdgst + pdu_len + ddgst);
 
 	/* 1, build nvme_tcp_cmd_pdu for FIELD_HEADER */
@@ -571,9 +603,9 @@ static int nvmf_tcp_build_req(struct nvmf_request *req)
 
 	/* 2, build hdgst for FIELD_HDGST */
 	if (hdgst) {
-		/* TODO write hdgst in iov */
+		priv->hdr_digest = nvme_tcp_hdgst(pdu, sizeof(struct nvme_tcp_cmd_pdu));
 		iov = nvmf_tcp_req_iov(req, FIELD_HDGST);
-		iov->iov_base = &priv->hdigest;
+		iov->iov_base = &priv->hdr_digest;
 		iov->iov_len = hdgst;
 	}
 
@@ -585,15 +617,7 @@ static int nvmf_tcp_build_req(struct nvmf_request *req)
 		iov->iov_len = tcp_queue->cpda;
 	}
 
-	/* 4, build ddgst for FIELD_DDGST */
-	if (ddgst) {
-		/* TODO write ddgst in iov */
-		iov = nvmf_tcp_req_iov(req, FIELD_DDGST);
-		iov->iov_base = &priv->ddigest;
-		iov->iov_len = ddgst;
-	}
-
-	/* 5, build data mapping for cmd */
+	/* 4, build data mapping for cmd */
 	nvmf_tcp_map_data(req, tcp_queue);
 
 	return 0;
@@ -604,10 +628,10 @@ static int nvmf_tcp_queue_send(struct nvmf_tcp_queue *tcp_queue)
 	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvmf_tcp_priv *priv;
 	struct iovec iovs[QUEUE_MAX_IOV];
-	struct iovec *iov = NULL, *o_iov;
+	struct iovec *iov = NULL, *o_iov, *data_iovs = NULL;
 	struct nvmf_request *req = NULL;
 	ssize_t rwsize = 0, offset, totalsize = 0, ret;
-	int tag, iovcnt = 0, iovidx;
+	int tag, iovcnt = 0, iovidx, data_iovcnt = 0;
 
 	/* previous outputing req is still in process? */
 	if (unlikely(tcp_queue->o_req)) {
@@ -690,6 +714,8 @@ process_one:
 	}
 
 	if (priv->incapsule) {
+		data_iovs = req->iovs;
+		data_iovcnt = req->iovcnt;
 		for (iovidx = 0; iovidx < req->iovcnt; iovidx++) {
 			iov = &req->iovs[iovidx];
 			if (!iov->iov_len) {
@@ -716,9 +742,11 @@ process_one:
 		o_iov = &tcp_queue->o_iovs[tcp_queue->o_iovcnt++];
 		o_iov->iov_base = iov->iov_base + offset;
 		o_iov->iov_len = iov->iov_len - offset;
+		data_iovs = o_iov;
 		totalsize = o_iov->iov_len;
 
-		for (iovidx++; iovidx < req->iovcnt; iovidx++) {
+		for (iovidx++, data_iovcnt++; iovidx < req->iovcnt; iovidx++) {
+			data_iovcnt++;
 			iov = &req->iovs[iovidx];
 			o_iov = &tcp_queue->o_iovs[tcp_queue->o_iovcnt++];
 			if (totalsize + iov->iov_len < priv->r2t_length) {
@@ -736,15 +764,24 @@ process_one:
 		tcp_queue->o_totalsize += totalsize;
 	}
 
-	iov = nvmf_tcp_req_iov(req, FIELD_DDGST);
-	if (iov->iov_len) {
+	if (tcp_queue->data_digest && data_iovs != NULL) {
 		o_iov = &tcp_queue->o_iovs[tcp_queue->o_iovcnt++];
+		iov = nvmf_tcp_req_iov(req, FIELD_DDGST);
+
+		priv->data_digest = nvme_tcp_ddgst(data_iovs, data_iovcnt);
+		iov->iov_base = &priv->data_digest;
+		iov->iov_len = sizeof(priv->data_digest);
+
 		*o_iov = *iov;
 		tcp_queue->o_totalsize += iov->iov_len;
+		log_debug(ctrl, "queue[%d] req[%p] tag[0x%x], add data_digest: 0x%x\n",
+		          tcp_queue->queue->qid, tcp_queue->o_req, tcp_queue->o_req->tag,
+		          priv->data_digest);
 	}
 
-	log_debug(ctrl, "queue[%d] req[%p] tag[0x%x]try to send pdu\n", tcp_queue->queue->qid,
-	          tcp_queue->o_req, tcp_queue->o_req->tag);
+	log_debug(ctrl, "queue[%d] req[%p] tag[0x%x]try to send pdu, total size: %ld\n",
+	          tcp_queue->queue->qid, tcp_queue->o_req, tcp_queue->o_req->tag,
+	          tcp_queue->o_totalsize);
 	ret = writev(tcp_queue->sockfd, tcp_queue->o_iovs, tcp_queue->o_iovcnt);
 	if (ret < 0) {
 		if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -816,8 +853,8 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvmf_request *req;
 	struct nvmf_tcp_priv *priv;
+
 	__u16 tag = pdu->command_id;
-	__u8 hdgst = nvme_tcp_hdgst_len(tcp_queue);
 	__u8 ddgst = nvme_tcp_ddgst_len(tcp_queue);
 	__u32 data_offset = le32toh(pdu->data_offset);
 	__u32 data_length = le32toh(pdu->data_length);
@@ -850,15 +887,6 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 	nvmf_tcp_queue_clear_input(tcp_queue);
 	tcp_queue->i_req = req;
 
-	/* build hdgst for FIELD_HDGST */
-	if (hdgst) {
-		/* TODO write hdgst in iov */
-		i_iov = &tcp_queue->i_iovs[tcp_queue->i_iovcnt++];
-		i_iov->iov_base = &priv->hdigest;
-		i_iov->iov_len = hdgst;
-		tcp_queue->i_totalsize += i_iov->iov_len;
-	}
-
 	/* build CPDA for FIELD_CPDA */
 	if (tcp_queue->cpda) {
 		/* TODO write cpda PAD data in iov */
@@ -883,10 +911,12 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 	i_iov = &tcp_queue->i_iovs[tcp_queue->i_iovcnt++];
 	i_iov->iov_base = iov->iov_base + offset;
 	i_iov->iov_len = iov->iov_len - offset;
+	tcp_queue->data_iovs = i_iov;
 	tcp_queue->i_totalsize += i_iov->iov_len;
 	totalsize = i_iov->iov_len;
 
-	for (iovidx++; iovidx < req->iovcnt; iovidx++) {
+	for (tcp_queue->data_iovcnt++, iovidx++; iovidx < req->iovcnt; iovidx++) {
+		tcp_queue->data_iovcnt++;
 		iov = &req->iovs[iovidx];
 		i_iov = &tcp_queue->i_iovs[tcp_queue->i_iovcnt++];
 		if (totalsize + iov->iov_len < data_length) {
@@ -903,9 +933,8 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 
 	/* build ddgst for FIELD_DDGST */
 	if (ddgst) {
-		/* TODO write ddgst in iov */
 		i_iov = &tcp_queue->i_iovs[tcp_queue->i_iovcnt++];
-		i_iov->iov_base = &priv->ddigest;
+		i_iov->iov_base = &priv->data_digest;
 		i_iov->iov_len = ddgst;
 		tcp_queue->i_totalsize += i_iov->iov_len;
 	}
@@ -923,14 +952,27 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
 
 	log_debug(ctrl, "queue[%d] input req total %lu, rwsize %lu, i_iovcnt %d\n",
               tcp_queue->queue->qid, tcp_queue->i_totalsize, ret, tcp_queue->i_iovcnt);
-	if (ret == tcp_queue->i_totalsize) {
-		nvmf_tcp_queue_clear_input(tcp_queue);
-		return 0;
-	} else {
+	if (ret != tcp_queue->i_totalsize) {
 		tcp_queue->i_rwsize = ret;
+		return ret;
 	}
-
-	return ret;
+	/* read completed */
+	if (ddgst) {
+		tcp_queue->exp_data_digest = nvme_tcp_ddgst(tcp_queue->data_iovs,
+		                                            tcp_queue->data_iovcnt);
+		log_debug(ctrl, "queue[%d] input req[0x%x], recv data_digest: 0x%x, "
+		          "exp data_digest: 0x%x\n", tcp_queue->queue->qid, req,
+		          priv->data_digest, tcp_queue->exp_data_digest);
+		if (tcp_queue->exp_data_digest != priv->data_digest) {
+			log_error(ctrl, "queue[%d] input req[0x%x]: data_digest doesn't match,"
+			          " recv data_digest: 0x%x,  exp data_digest: 0x%x\n",
+			          tcp_queue->queue->qid, req, priv->data_digest,
+			          tcp_queue->exp_data_digest);
+			assert(0);
+		}
+	}
+	nvmf_tcp_queue_clear_input(tcp_queue);
+	return 0;
 }
 
 static int nvmf_tcp_send_h2c_data(struct nvmf_tcp_queue *tcp_queue, struct nvmf_request *req,
@@ -990,9 +1032,9 @@ static int nvmf_tcp_send_h2c_data(struct nvmf_tcp_queue *tcp_queue, struct nvmf_
 
 	/* 2, build hdgst for FIELD_HDGST */
 	if (hdgst) {
-		/* TODO write hdgst in iov */
+		priv->hdr_digest = nvme_tcp_hdgst(pdu, sizeof(*pdu));
 		iov = nvmf_tcp_req_iov(req, FIELD_HDGST);
-		iov->iov_base = &priv->hdigest;
+		iov->iov_base = &priv->hdr_digest;
 		iov->iov_len = hdgst;
 	}
 
@@ -1002,14 +1044,6 @@ static int nvmf_tcp_send_h2c_data(struct nvmf_tcp_queue *tcp_queue, struct nvmf_
 		iov = nvmf_tcp_req_iov(req, FIELD_CPDA);
 		iov->iov_base = tcp_queue->pad;
 		iov->iov_len = tcp_queue->cpda;
-	}
-
-	/* 4, build ddgst for FIELD_DDGST */
-	if (ddgst) {
-		/* TODO write ddgst in iov */
-		iov = nvmf_tcp_req_iov(req, FIELD_DDGST);
-		iov->iov_base = &priv->ddigest;
-		iov->iov_len = ddgst;
 	}
 
 	/* remove from inflight */
@@ -1047,6 +1081,7 @@ static int nvmf_tcp_queue_recv(struct nvmf_tcp_queue *tcp_queue)
 	struct nvmf_ctrl *ctrl = tcp_queue->queue->ctrl;
 	struct nvme_tcp_rsp_pdu *pdu = &tcp_queue->rsppdu;
 	struct nvme_tcp_hdr *hdr = &pdu->hdr;
+	struct nvmf_tcp_priv *priv;
 	struct iovec iovs[QUEUE_MAX_IOV];
 	struct iovec *i_iov, *iov = NULL;
 	ssize_t offset, rwsize = 0, ret;
@@ -1086,17 +1121,36 @@ static int nvmf_tcp_queue_recv(struct nvmf_tcp_queue *tcp_queue)
 		}
 
 		tcp_queue->i_rwsize += ret;
-		if (tcp_queue->i_rwsize == tcp_queue->i_totalsize) {
-			nvmf_tcp_queue_clear_input(tcp_queue);
-		} else {
+		if (tcp_queue->i_rwsize != tcp_queue->i_totalsize) {
 			return ret;
 		}
+		if (tcp_queue->data_digest && tcp_queue->data_iovcnt != 0) {
+			priv = (struct nvmf_tcp_priv *)tcp_queue->i_req->priv;
+			tcp_queue->exp_data_digest = nvme_tcp_ddgst(tcp_queue->data_iovs,
+			                                            tcp_queue->data_iovcnt);
+			log_debug(ctrl, "queue[%d] req[0x%x] test ddgest, recv: 0x%x, exp 0x%x\n",
+			          tcp_queue->queue->qid, tcp_queue->i_req, priv->data_digest,
+				      tcp_queue->exp_data_digest);
+			if (tcp_queue->exp_data_digest != priv->data_digest) {
+				log_error(ctrl, "queue[%d] req[0x%x] test ddgest, "
+				          "recv: 0x%x, exp 0x%x\n", tcp_queue->queue->qid,
+				          tcp_queue->i_req, priv->data_digest,
+				          tcp_queue->exp_data_digest);
+				assert(0);
+			}
+		}
+		nvmf_tcp_queue_clear_input(tcp_queue);
 	}
 
 process_one:
 	/* read pdu header firstly */
 	/* TODO corrupted CQE, need reset ctrl */
-	memset((char *)pdu + tcp_queue->pdu_rwsize, 0x00, sizeof(*pdu) - tcp_queue->pdu_rwsize);
+	if (tcp_queue->pdu_rwsize >= sizeof(*pdu)) {
+		goto recv_hdr_digest;
+	}
+	if (tcp_queue->pdu_rwsize == 0) {
+		memset((char *)pdu, 0x00, sizeof(*pdu));
+	}
 	ret = read(tcp_queue->sockfd, (char *)pdu + tcp_queue->pdu_rwsize,
 	           sizeof(*pdu) - tcp_queue->pdu_rwsize);
 	log_debug(ctrl, "queue[%d] ret %ld, errno %d\n", tcp_queue->queue->qid, ret, errno);
@@ -1112,16 +1166,56 @@ process_one:
 		return 0;
 	}
 
-	if ((ret + tcp_queue->pdu_rwsize) < sizeof(*pdu)) {
-		tcp_queue->pdu_rwsize += ret;
+	tcp_queue->pdu_rwsize += ret;
+	if (tcp_queue->pdu_rwsize < sizeof(*pdu)) {
 		return 0;
-	} else {
-		tcp_queue->pdu_rwsize = 0;
 	}
-
 	log_debug(ctrl, "queue[%d] read pdu ret: %ld, type: %d, flags: %d, hlen: %d, pdo: %d, "
 	          "plen : %d\n", tcp_queue->queue->qid, ret, hdr->type, hdr->flags, hdr->hlen,
 	          hdr->pdo, hdr->plen);
+
+	if (!(hdr->flags & NVME_TCP_F_HDGST)) {
+		log_debug(ctrl, "queue[%d] there is no hdr_digest, goto handle rsp\n",
+		          tcp_queue->queue->qid);
+		goto handle_rsp;
+	}
+
+recv_hdr_digest:
+	if (tcp_queue->pdu_rwsize == sizeof(*pdu)) {
+		memset((char *)&tcp_queue->recv_hdr_digest, 0x00,
+		       sizeof(tcp_queue->recv_hdr_digest));
+	}
+	ret = read(tcp_queue->sockfd, (char *)&tcp_queue->recv_hdr_digest,
+	           sizeof(tcp_queue->recv_hdr_digest) - (tcp_queue->pdu_rwsize - sizeof(*pdu)));
+	log_debug(ctrl, "queue[%d] ret %ld, errno %d, rwsize: %d\n",
+	          tcp_queue->queue->qid, ret, errno, tcp_queue->pdu_rwsize);
+	if (ret < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			return 0;
+		}
+
+		log_error(ctrl, "read pdu error, queue %d: %m\n", nvmf_tcp_queue_id(tcp_queue));
+		return -errno;
+	}
+	if (ret + tcp_queue->pdu_rwsize < sizeof(*pdu) + sizeof(tcp_queue->recv_hdr_digest)) {
+		tcp_queue->pdu_rwsize += ret;
+		return 0;
+	}
+	tcp_queue->exp_hdr_digest = nvme_tcp_hdgst(pdu, sizeof(*pdu));
+	log_debug(ctrl, "queue[%d] check hdr_digest, recv: 0x%x, exp: 0x%x\n",
+	          tcp_queue->queue->qid, le32toh(tcp_queue->recv_hdr_digest),
+	          le32toh(tcp_queue->exp_hdr_digest));
+
+	if (tcp_queue->exp_hdr_digest != tcp_queue->recv_hdr_digest) {
+		log_error(ctrl, "hdr_digest not match, recv: 0x%x, exp: 0x%x",
+		          le32toh(tcp_queue->recv_hdr_digest),
+		          le32toh(tcp_queue->exp_hdr_digest));
+		/* TODO: reset controller */
+		assert(0);
+	}
+
+handle_rsp:
+	tcp_queue->pdu_rwsize = 0;
 	switch (hdr->type) {
 	case nvme_tcp_rsp:
 		ret = nvmf_tcp_queue_handle_rsp(tcp_queue, pdu);
