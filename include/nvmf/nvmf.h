@@ -21,6 +21,8 @@ typedef void(*nvmf_log_fn) (int log_level, const char*);
 /* options API */
 nvmf_options_t nvmf_default_options(const char *uri, char **err_msg);
 
+void nvmf_options_set_hostnqn(nvmf_options_t opts, const char *hostnqn, size_t length);
+
 void nvmf_options_free(nvmf_options_t opts);
 
 void nvmf_options_set_kato(nvmf_options_t opts, unsigned int milliseconds);
@@ -32,9 +34,9 @@ void nvmf_options_set_log_level(nvmf_options_t opts, int level);
 void nvmf_options_set_log_fn(nvmf_options_t opts, nvmf_log_fn fn);
 
 /* options API for nvme over tcp */
-void nvmf_options_set_tcp_hdr_digest(nvmf_options_t opts, bool enable_hdr_dgst);
+void nvmf_options_set_tcp_hdr_digest(nvmf_options_t opts, bool enable);
 
-void nvmf_options_set_tcp_data_digest(nvmf_options_t opts, bool enable_data_dgst);
+void nvmf_options_set_tcp_data_digest(nvmf_options_t opts, bool enable);
 
 
 

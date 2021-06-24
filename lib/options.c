@@ -190,6 +190,19 @@ nvmf_ctrl_t nvmf_default_options(const char *uri, char** err_msg)
 	return options;
 }
 
+void nvmf_options_set_hostnqn(nvmf_options_t opts, const char *hostnqn, size_t length) 
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+    assert(length <= NVMF_NQN_SIZE);
+    if (!options->hostnqn) {
+        options->hostnqn = nvmf_calloc(1, NVMF_NQN_SIZE);
+    }
+    memcpy(options->hostnqn, hostnqn, length);
+    if (length < NVMF_NQN_SIZE) {
+        options->hostnqn[length] = 0;
+    }
+}
+
 void nvmf_options_free(nvmf_ctrl_t options)
 {
 	struct nvmf_ctrl_options *_options = (struct nvmf_ctrl_options *)options;
@@ -232,14 +245,14 @@ void nvmf_options_set_log_fn(nvmf_options_t opts, nvmf_log_fn fn)
 	options->log_fn = fn;
 }
 
-void nvmf_options_set_tcp_hdr_digest(nvmf_options_t opts, bool enable_hdr_digest)
+void nvmf_options_set_tcp_hdr_digest(nvmf_options_t opts, bool enable)
 {
 	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
-	options->hdr_digest = enable_hdr_digest;
+	options->hdr_digest = enable;
 }
 
-void nvmf_options_set_tcp_data_digest(nvmf_options_t opts, bool enable_data_digest)
+void nvmf_options_set_tcp_data_digest(nvmf_options_t opts, bool enable)
 {
 	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
-	options->data_digest = enable_data_digest;
+	options->data_digest = enable;
 }
