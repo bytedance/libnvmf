@@ -193,14 +193,16 @@ nvmf_ctrl_t nvmf_default_options(const char *uri, char** err_msg)
 void nvmf_options_set_hostnqn(nvmf_options_t opts, const char *hostnqn, size_t length)
 {
 	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
-    assert(length <= NVMF_NQN_SIZE);
-    if (!options->hostnqn) {
-        options->hostnqn = nvmf_calloc(1, NVMF_NQN_SIZE);
-    }
-    memcpy(options->hostnqn, hostnqn, length);
-    if (length < NVMF_NQN_SIZE) {
-        options->hostnqn[length] = 0;
-    }
+
+	assert(length <= NVMF_NQN_SIZE);
+	if (!options->hostnqn) {
+		options->hostnqn = nvmf_calloc(1, NVMF_NQN_SIZE);
+	}
+
+	memcpy(options->hostnqn, hostnqn, length);
+	if (length < NVMF_NQN_SIZE) {
+		options->hostnqn[length] = 0;
+	}
 }
 
 void nvmf_options_free(nvmf_ctrl_t options)
