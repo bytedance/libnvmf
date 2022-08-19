@@ -118,16 +118,9 @@ static inline int nvmf_tcp_queue_id(struct nvmf_tcp_queue *tcp_queue)
 	return tcp_queue->queue->qid;
 }
 
-static inline size_t nvmf_tcp_iov_datalen(struct nvmf_request *req)
+static inline size_t nvmf_tcp_req_datalen(struct nvmf_request *req)
 {
-	size_t datalen = 0;
-	int index;
-
-	for (index = 0; index < req->iovcnt; index++) {
-		datalen += req->iovs[index].iov_len;
-	}
-
-	return datalen;
+	return nvmf_iov_datalen(req->iovs, req->iovcnt);
 }
 
 static inline struct iovec *nvmf_tcp_xfer_iov(struct nvmf_tcp_xfer *xfer, int index)
@@ -511,7 +504,7 @@ static int nvmf_tcp_build_cmd(struct nvmf_request *req, struct nvmf_tcp_queue *t
 	struct nvme_tcp_hdr *hdr = &pdu->hdr;
 	struct nvme_command *cmd = req->cmd;
 	struct iovec *tx_iov;
-	__u32 data_len = nvmf_tcp_iov_datalen(req);
+	__u32 data_len = nvmf_tcp_req_datalen(req);
 	__u32 pdu_len = 0;
 	__u8 hdgst = nvme_tcp_hdgst_len(tcp_queue);
 	__u8 ddgst = nvme_tcp_ddgst_len(tcp_queue);
@@ -521,7 +514,7 @@ static int nvmf_tcp_build_cmd(struct nvmf_request *req, struct nvmf_tcp_queue *t
 	req->tag = nvmf_queue_req_get_tag(req);
 	req->cmd->common.command_id = req->tag;
 
-	data_len = nvmf_tcp_iov_datalen(req);
+	data_len = nvmf_tcp_req_datalen(req);
 	if (is_write && data_len <= nvme_tcp_incapsule_size(tcp_queue)) {
 		pdu_len = data_len;
 	}
@@ -588,7 +581,7 @@ static int nvmf_tcp_build_h2c(struct nvmf_request *req, struct nvmf_tcp_queue *t
 	__u8 pad = nvme_tcp_pad_len(tcp_queue, sizeof(struct nvme_tcp_data_pdu));
 	__u32 offset = priv->r2t_offset;
 	__u32 length = priv->r2t_length;
-	__u32 data_len = nvmf_tcp_iov_datalen(req);
+	__u32 data_len = nvmf_tcp_req_datalen(req);
 	struct iovec *iov = NULL, *tx_iov;
 	size_t totalsize = 0;
 
@@ -867,7 +860,7 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
                   "length: %d\n", tcp_queue->queue->qid, req, pdu->command_id, pdu->ttag,
                   data_offset, data_length);
 
-	length = nvmf_tcp_iov_datalen(req);
+	length = nvmf_tcp_req_datalen(req);
 	if (data_offset + data_length > length) {
 		log_error("read buf is not enough, offset[%d] + length[%d] < datalen[%d]\n",
                           data_offset, data_length, length);
@@ -982,7 +975,7 @@ static int nvmf_tcp_queue_handle_r2t(struct nvmf_tcp_queue *tcp_queue, struct nv
 	priv->ttag = pdu->ttag;
 	priv->r2t_offset = le32toh(pdu->r2t_offset);
 	priv->r2t_length = le32toh(pdu->r2t_length);
-	data_len = nvmf_tcp_iov_datalen(req);
+	data_len = nvmf_tcp_req_datalen(req);
 	if (priv->r2t_offset + priv->r2t_length > data_len) {
 		/* TODO need reset controller */
 		log_warn("r2t: queue[%d] offset %u, length %u, data_len %u\n",
