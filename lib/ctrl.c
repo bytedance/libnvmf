@@ -178,9 +178,7 @@ static int nvmf_setup_admin_queue(void *arg)
 		return ret;
 	}
 
-	nvmf_config_admin_queue(queue);
-
-	return ret;
+	return nvmf_config_admin_queue(queue);
 }
 
 static int nvmf_setup_io_queue(void *arg)
