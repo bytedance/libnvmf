@@ -20,8 +20,8 @@
 #include <unistd.h>
 
 /*
- * nvmf-rdma://10.154.41.217:4420/nqn-nvmet-ex/1
- * nvmf-tcp://10.154.41.217:4420/nqn-nvmet-ex/2
+ * nvmf-rdma://192.168.122.100:4420/nqn-nvmet-ex/1
+ * nvmf-tcp://192.168.122.100:4420/nqn-nvmet-ex/2
  */
 static int nvmf_parse_uri(const char *uri, struct nvmf_ctrl_options *options, char *reason)
 {
@@ -196,4 +196,18 @@ void nvmf_options_set_io_queues(nvmf_options_t opts, unsigned int io_queues)
 	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
 
 	options->nr_queues = io_queues + 1;
+}
+
+void nvmf_options_set_hdgst(nvmf_options_t opts, unsigned int hdgst)
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+
+	options->hdr_digest = !!hdgst;
+}
+
+void nvmf_options_set_ddgst(nvmf_options_t opts, unsigned int ddgst)
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+
+	options->data_digest = !!ddgst;
 }
