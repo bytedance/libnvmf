@@ -1,4 +1,4 @@
-#HOWTO
+# HOWTO
 
 ## Build library
 ```

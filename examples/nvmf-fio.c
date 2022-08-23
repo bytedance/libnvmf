@@ -207,6 +207,8 @@ void print_usage(void)
 	printf("\t--randrw\n");
 	printf("\t--randdiscard\n");
 	printf("\t--randwritezeroes\n");
+	printf("\t--hdgst\n");
+	printf("\t--ddgst\n");
 }
 
 int main(int argc, char *argv[])
@@ -216,6 +218,7 @@ int main(int argc, char *argv[])
 	struct sigaction sa;
 	int long_index = 0, opt;
 	char *filename = NULL;
+	unsigned int hdgst = 0, ddgst = 0;
 	static struct option long_options[] = {
 		{"bs",              required_argument, 0,  'b' },
 		{"iodepth",         required_argument, 0,  'd' },
@@ -227,10 +230,12 @@ int main(int argc, char *argv[])
 		{"randrw",          no_argument,       0,  'm' },
 		{"randdiscard",     no_argument,       0,  'D' },
 		{"randwritezeroes", no_argument,       0,  'z' },
+		{"hdgst",           no_argument,       0,  'g' },
+		{"ddgst",           no_argument,       0,  'G' },
 		{0,                 0,                 0,  0   }
 	};
 
-	while ((opt = getopt_long(argc, argv, "b:d:f:q:t:rwmDzh", long_options, &long_index))
+	while ((opt = getopt_long(argc, argv, "b:d:f:q:t:rwmDzhgG", long_options, &long_index))
                != -1) {
 		switch (opt) {
 		case 'b':
@@ -263,6 +268,12 @@ int main(int argc, char *argv[])
 		case 'z':
 			randopt =  RANDWRITEZEROES;
 			break;
+		case 'g':
+			hdgst =  1;
+			break;
+		case 'G':
+			ddgst =  1;
+			break;
 		case 'h':
 		default:
 			print_usage();
@@ -289,6 +300,8 @@ int main(int argc, char *argv[])
 
 	nvmf_options_set_kato(options, 3000);
 	nvmf_options_set_io_queues(options, ioqueues);
+	nvmf_options_set_hdgst(options, !!hdgst);
+	nvmf_options_set_ddgst(options, !!ddgst);
 	ctrl = nvmf_ctrl_create(options);
 	if (!ctrl) {
 		printf("create src ctrl failed\n");
