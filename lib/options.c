@@ -198,6 +198,24 @@ void nvmf_options_set_io_queues(nvmf_options_t opts, unsigned int io_queues)
 	options->nr_queues = io_queues + 1;
 }
 
+int nvmf_options_set_hostnqn(nvmf_options_t opts, const char *hostnqn, size_t length)
+{
+	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;
+
+	if (length > NVMF_NQN_SIZE) {
+		return -EINVAL;
+	}
+
+	if (options->hostnqn) {
+		nvmf_free(options->hostnqn);
+	}
+
+	options->hostnqn = nvmf_calloc(1, NVMF_NQN_SIZE);
+	memcpy(options->hostnqn, hostnqn, length);
+
+	return 0;
+}
+
 void nvmf_options_set_hdgst(nvmf_options_t opts, unsigned int hdgst)
 {
 	struct nvmf_ctrl_options *options = (struct nvmf_ctrl_options *)opts;

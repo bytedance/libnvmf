@@ -25,6 +25,8 @@ void nvmf_options_set_kato(nvmf_options_t opts, unsigned int milliseconds);
 
 void nvmf_options_set_io_queues(nvmf_options_t opts, unsigned int io_queues);
 
+int nvmf_options_set_hostnqn(nvmf_options_t opts, const char *hostnqn, size_t length);
+
 void nvmf_options_set_hdgst(nvmf_options_t opts, unsigned int hdgst);
 
 void nvmf_options_set_ddgst(nvmf_options_t opts, unsigned int ddgst);
