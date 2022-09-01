@@ -1,4 +1,10 @@
 /* taken from linux, and modified by zhenwei pi */
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * NVMe over Fabrics TCP protocol header.
+ * Copyright (c) 2018 Lightbits Labs. All rights reserved.
+ */
+
 #ifndef _LINUX_NVME_TCP_H
 #define _LINUX_NVME_TCP_H
 
@@ -7,6 +13,7 @@
 #define NVME_TCP_DISC_PORT	8009
 #define NVME_TCP_ADMIN_CCSZ	8192
 #define NVME_TCP_DIGEST_LENGTH	4
+#define NVME_TCP_MIN_MAXH2CDATA 4096
 
 enum nvme_tcp_pfv {
 	NVME_TCP_PFV_1_0 = 0x0,

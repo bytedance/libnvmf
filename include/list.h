@@ -1,4 +1,5 @@
 /* taken from linux, and modified by zhenwei pi */
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef _LIST_H_
 #define _LIST_H_
 

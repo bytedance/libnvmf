@@ -6,8 +6,8 @@
 
 #ifndef _LINUX_NVME_RDMA_H
 #define _LINUX_NVME_RDMA_H
-#include <sys/socket.h>
-#include "types.h"
+
+#define NVME_RDMA_MAX_QUEUE_SIZE	128
 
 enum nvme_rdma_cm_fmt {
 	NVME_RDMA_CM_FMT_1_0 = 0x0,
