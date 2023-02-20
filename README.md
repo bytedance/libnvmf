@@ -6,7 +6,7 @@ cd lib
 make
 ```
 
-or enable RDMA:
+or enable RDMA(need rdmacm/ibverbs development package. Ex, installing on Debian/Ubuntu by command: apt-get install librdmacm-dev libibverbs-dev):
 ```
 make USE_RDMA=1
 ```
