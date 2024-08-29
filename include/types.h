@@ -56,6 +56,7 @@ static inline void set_unaligned_le32(__u8 *p, __u32 val)
         *p++ = val >> 24;
 }
 
+#ifndef __struct_group
 /**
  * taken from linux/include/uapi/linux/stddef.h
  * __struct_group() - Create a mirrored named and anonyomous struct
@@ -77,7 +78,9 @@ static inline void set_unaligned_le32(__u8 *p, __u32 val)
                 struct { MEMBERS } ATTRS; \
                 struct TAG { MEMBERS } ATTRS NAME; \
         }
+#endif
 
+#ifndef struct_group
 /**
  * taken from linux/include/linux/stddef.h
  * struct_group() - Wrap a set of declarations in a mirrored struct
@@ -93,5 +96,6 @@ static inline void set_unaligned_le32(__u8 *p, __u32 val)
  */
 #define struct_group(NAME, MEMBERS...)  \
         __struct_group(/* no tag */, NAME, /* no attrs */, MEMBERS)
+#endif
 
 #endif /* __LIBNVMF_TYPES__ */
