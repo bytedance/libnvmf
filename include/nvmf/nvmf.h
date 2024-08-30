@@ -31,7 +31,6 @@ void nvmf_options_set_hdgst(nvmf_options_t opts, unsigned int hdgst);
 
 void nvmf_options_set_ddgst(nvmf_options_t opts, unsigned int ddgst);
 
-
 /* ctrl API */
 nvmf_ctrl_t nvmf_ctrl_create(nvmf_options_t options);
 
@@ -40,7 +39,6 @@ void nvmf_ctrl_release(nvmf_ctrl_t ctrl);
 int nvmf_ctrl_fd(nvmf_ctrl_t ctrl);
 
 void nvmf_ctrl_process(nvmf_ctrl_t ctrl);
-
 
 /* namespace API */
 unsigned int nvmf_ns_count(nvmf_ctrl_t ctrl);
@@ -71,12 +69,12 @@ int nvmf_writev(nvmf_ctrl_t ctrl, unsigned int qid, struct iovec *iovs, int iovc
                 unsigned long offset, int flags);
 
 nvmf_req_t nvmf_read_async(nvmf_ctrl_t ctrl, int qid, struct iovec *iovs, int iovcnt,
-                           unsigned long offset, int flags, void (*cb)(unsigned short status,
-                           void *opaque), void *opaque);
+                           unsigned long offset, int flags,
+                           void (*cb)(unsigned short status, void *opaque), void *opaque);
 
 nvmf_req_t nvmf_write_async(nvmf_ctrl_t ctrl, int qid, struct iovec *iovs, int iovcnt,
-                            unsigned long offset, int flags, void (*cb)(unsigned short status,
-                            void *opaque), void *opaque);
+                            unsigned long offset, int flags,
+                            void (*cb)(unsigned short status, void *opaque), void *opaque);
 
 nvmf_req_t nvmf_discard_async(nvmf_ctrl_t ctrl, int qid, struct iovec *iovs, int iovcnt,
                               unsigned long offset, int flags,

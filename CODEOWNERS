@@ -4,8 +4,6 @@
 /include/nvme.h
 /include/nvme-rdma.h
 /include/nvme-tcp.h
-/scripts/checkpatch.pl
-
 
 # Source files of crc32 part taken from internet, original author: Mark Adler
 /include/crc32c.h

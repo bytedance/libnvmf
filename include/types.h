@@ -19,41 +19,43 @@
 #define UUID_SIZE 16
 
 typedef struct {
-	__u8 b[UUID_SIZE];
+    __u8 b[UUID_SIZE];
 } uuid_t;
 
 /* likely & unlikely */
-#define likely(x)	__builtin_expect(!!(x), 1)
-#define unlikely(x)	__builtin_expect(!!(x), 0)
+#define likely(x) __builtin_expect(!!(x), 1)
+#define unlikely(x) __builtin_expect(!!(x), 0)
 
 /* NULL */
 #ifndef NULL
-#define NULL    ((void *)0)
+#define NULL ((void *)0)
 #endif
 
 #ifndef offsetof
-#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *)0)->MEMBER)
+#define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *)0)->MEMBER)
 #endif
 
 #ifndef container_of
-#define container_of(ptr, type, member) ({			\
-		const typeof(((type *)0)->member) * __mptr = (ptr);	\
-		(type *)((char *)__mptr - offsetof(type, member)); })
+#define container_of(ptr, type, member)                                                            \
+    ({                                                                                             \
+        const typeof(((type *)0)->member) *__mptr = (ptr);                                         \
+        (type *)((char *)__mptr - offsetof(type, member));                                         \
+    })
 #endif
 
 static inline void set_unaligned_le24(__u8 *p, __u32 val)
 {
-        *p++ = val;
-        *p++ = val >> 8;
-        *p++ = val >> 16;
+    *p++ = val;
+    *p++ = val >> 8;
+    *p++ = val >> 16;
 }
 
 static inline void set_unaligned_le32(__u8 *p, __u32 val)
 {
-        *p++ = val;
-        *p++ = val >> 8;
-        *p++ = val >> 16;
-        *p++ = val >> 24;
+    *p++ = val;
+    *p++ = val >> 8;
+    *p++ = val >> 16;
+    *p++ = val >> 24;
 }
 
 #ifndef __struct_group
@@ -73,11 +75,15 @@ static inline void set_unaligned_le32(__u8 *p, __u32 val)
  * The named struct can also be explicitly tagged for layer reuse, as well
  * as both having struct attributes appended.
  */
-#define __struct_group(TAG, NAME, ATTRS, MEMBERS...) \
-        union { \
-                struct { MEMBERS } ATTRS; \
-                struct TAG { MEMBERS } ATTRS NAME; \
-        }
+#define __struct_group(TAG, NAME, ATTRS, MEMBERS...)                                               \
+    union {                                                                                        \
+        struct {                                                                                   \
+            MEMBERS                                                                                \
+        } ATTRS;                                                                                   \
+        struct TAG {                                                                               \
+            MEMBERS                                                                                \
+        } ATTRS NAME;                                                                              \
+    }
 #endif
 
 #ifndef struct_group
@@ -94,8 +100,7 @@ static inline void set_unaligned_le32(__u8 *p, __u32 val)
  * used to reason about the start, end, and size of the group of
  * struct members.
  */
-#define struct_group(NAME, MEMBERS...)  \
-        __struct_group(/* no tag */, NAME, /* no attrs */, MEMBERS)
+#define struct_group(NAME, MEMBERS...) __struct_group(/* no tag */, NAME, /* no attrs */, MEMBERS)
 #endif
 
 #endif /* __LIBNVMF_TYPES__ */
