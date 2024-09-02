@@ -74,6 +74,7 @@ struct nvmf_tcp_priv {
     union nvme_tcp_pdu txpdu;
     union nvme_tcp_pdu rxpdu;
 
+    bool data_last_success;
     __u16 ttag;
     __le32 hdgst;
     __le32 ddgst;
@@ -222,7 +223,7 @@ static int nvmf_tcp_initialize_connection(struct nvmf_tcp_queue *tcp_queue)
     icreq.hdr.plen = htole32(icreq.hdr.hlen);
     icreq.pfv = htole16(NVME_TCP_PFV_1_0);
     icreq.maxr2t = 0;
-    icreq.hpda = tcp_queue->hpda;
+    icreq.hpda = tcp_queue->hpda = 0;
     if (tcp_queue->hdr_digest) {
         icreq.digest |= NVME_TCP_HDR_DIGEST_ENABLE;
     }
@@ -875,6 +876,23 @@ static int nvmf_tcp_queue_handle_rsp(struct nvmf_tcp_queue *tcp_queue, struct nv
     return 0;
 }
 
+/* The last C2H PDU with NVME_TCP_F_DATA_SUCCESS, then no RSP PDU is needed. Use a fake RSP to
+ * complete this request */
+static inline void nvmf_tcp_queue_data_last_success(struct nvmf_tcp_queue *tcp_queue,
+                                                    struct nvmf_request *req)
+{
+    struct nvmf_tcp_priv *priv = (struct nvmf_tcp_priv *)req->priv;
+
+    tcp_queue->rx.req = NULL;
+    if (!priv->data_last_success) {
+        return;
+    }
+
+    struct nvme_tcp_rsp_pdu rsp = {0};
+    rsp.cqe.command_id = req->tag;
+    nvmf_tcp_queue_handle_rsp(tcp_queue, &rsp);
+}
+
 static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
                                           struct nvme_tcp_data_pdu *pdu)
 {
@@ -882,14 +900,14 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
     struct nvmf_request *req;
     struct nvmf_tcp_priv *priv;
     __u16 tag = pdu->command_id;
+    __u8 flags = pdu->hdr.flags;
     __u8 hdgst = nvme_tcp_hdgst_len(tcp_queue);
     __u8 ddgst = nvme_tcp_ddgst_len(tcp_queue);
     __u32 data_offset = le32toh(pdu->data_offset);
     __u32 data_length = le32toh(pdu->data_length);
     __u32 length;
-    struct iovec *iov = NULL, *rx_iov;
-    ssize_t ret, rwsize = 0, totalsize = 0, offset;
-    int iovidx = 0, rx_iovcnt = FIELD_DATA;
+    struct iovec *rx_iov;
+    ssize_t ret;
 
     req = nvmf_queue_req_by_tag(tcp_queue->queue, tag);
     if (!req) {
@@ -897,9 +915,10 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
         return -EINVAL;
     }
 
-    log_debug("queue[%d] handle c2h data: req[%p] tag[0x%x] ttag: 0x%x, offset: %d, "
+    log_debug("queue[%d] handle c2h data: req[%p] tag[0x%x] flags: 0x%x ttag: 0x%x, offset: %d, "
               "length: %d\n",
-              tcp_queue->queue->qid, req, pdu->command_id, pdu->ttag, data_offset, data_length);
+              tcp_queue->queue->qid, req, pdu->command_id, flags, pdu->ttag, data_offset,
+              data_length);
 
     length = nvmf_tcp_req_datalen(req);
     if (data_offset + data_length > length) {
@@ -909,6 +928,7 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
     }
 
     priv = (struct nvmf_tcp_priv *)req->priv;
+    priv->data_last_success = (flags & NVME_TCP_F_DATA_LAST) && (flags & NVME_TCP_F_DATA_SUCCESS);
     priv->c2h_offset = data_offset;
     priv->c2h_length = data_length;
 
@@ -934,36 +954,7 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
     }
 
     /* 4, build user data inputing vectors, see nvmf_tcp_build_h2c */
-    rwsize = 0;
-    for (iovidx = 0; iovidx < req->iovcnt; iovidx++) {
-        iov = &req->iovs[iovidx];
-        if (iov->iov_len + rwsize < data_offset) {
-            rwsize += iov->iov_len;
-        } else {
-            break;
-        }
-    }
-
-    if (data_offset >= rwsize) {
-        offset = data_offset - rwsize;
-        rx_iov = &rx->iovs[rx_iovcnt++];
-        rx_iov->iov_base = iov->iov_base + offset;
-        rx_iov->iov_len = iov->iov_len - offset;
-        totalsize = rx_iov->iov_len;
-    }
-
-    for (iovidx++; iovidx < req->iovcnt; iovidx++) {
-        iov = &req->iovs[iovidx];
-        rx_iov = &rx->iovs[rx_iovcnt++];
-        if (totalsize + iov->iov_len < data_length) {
-            *rx_iov = *iov;
-            totalsize += iov->iov_len;
-        } else {
-            rx_iov->iov_base = iov->iov_base;
-            rx_iov->iov_len = data_length - totalsize;
-            break;
-        }
-    }
+    nvmf_iov_copy(req->iovs, req->iovcnt, data_offset, data_length, &rx->iovs[FIELD_DATA]);
 
     /* 5, build ddgst for FIELD_DDGST */
     if (ddgst) {
@@ -990,10 +981,13 @@ static int nvmf_tcp_queue_handle_c2h_data(struct nvmf_tcp_queue *tcp_queue,
     log_debug("queue[%d] input req total %lu, rwsize %lu\n", tcp_queue->queue->qid, rx->totalsize,
               ret);
 
+    /* this C2H PDU is fully received ? */
     if (rx->rwsize == rx->totalsize) {
         if (nvmf_tcp_verify_ddgst(tcp_queue, priv->ddgst)) {
             return -EIO;
         }
+
+        nvmf_tcp_queue_data_last_success(tcp_queue, req);
     }
 
     return ret;
@@ -1044,36 +1038,14 @@ static int nvmf_tcp_queue_recv(struct nvmf_tcp_queue *tcp_queue)
     struct nvme_tcp_hdr *hdr = &pdu->hdr;
     struct nvmf_tcp_priv *priv;
     struct iovec iovs[QUEUE_MAX_IOV];
-    struct iovec *rx_iov, *iov = NULL;
-    ssize_t offset, rwsize = 0, ret;
-    int iovcnt = 0, iovidx;
+    ssize_t rwsize = nvmf_iov_datalen(rx->iovs, ARRAY_SIZE(rx->iovs));
+    ssize_t ret;
+    int iovcnt;
     __u8 hdgst = nvme_tcp_hdgst_len(tcp_queue);
 
     if (rx->req) {
         /* called from epoll POLLIN, continue to recv */
-        for (iovidx = 0; iovidx < ARRAY_SIZE(rx->iovs); iovidx++) {
-            rx_iov = &rx->iovs[iovidx];
-            if (rwsize + rx_iov->iov_len < rx->rwsize) {
-                rwsize += rx_iov->iov_len;
-            } else {
-                break;
-            }
-        }
-
-        /* build remaining data inputing vector */
-        if (rx->rwsize > rwsize) {
-            offset = rx->rwsize - rwsize;
-            iov = &iovs[iovcnt++];
-            iov->iov_base = rx_iov->iov_base + offset;
-            iov->iov_len = rx_iov->iov_len - offset;
-        }
-
-        for (iovidx++; iovidx < ARRAY_SIZE(rx->iovs); iovidx++) {
-            rx_iov = &rx->iovs[iovidx];
-            iov = &iovs[iovcnt++];
-            *iov = *rx_iov;
-        }
-
+        iovcnt = nvmf_iov_copy(rx->iovs, ARRAY_SIZE(rx->iovs), rx->rwsize, rwsize, iovs);
         ret = readv(tcp_queue->sockfd, iovs, iovcnt);
         if (ret < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -1094,6 +1066,8 @@ static int nvmf_tcp_queue_recv(struct nvmf_tcp_queue *tcp_queue)
         if (ret) {
             return ret;
         }
+
+        nvmf_tcp_queue_data_last_success(tcp_queue, rx->req);
     }
 
 process_one:

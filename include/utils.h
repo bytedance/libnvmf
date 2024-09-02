@@ -110,6 +110,61 @@ static inline size_t nvmf_buf_to_iov(struct iovec *iovs, int iovcnt, char *buf)
     return datalen;
 }
 
+/* Duplicate iovec */
+static inline void nvmf_iov_dup(const struct iovec *src_iovs, struct iovec *dst_iovs,
+                                unsigned int num_iov)
+{
+    memcpy(dst_iovs, src_iovs, sizeof(struct iovec) * num_iov);
+}
+
+/* Skip @offset, build from @src_iovs to @dst_iovs of @bytes.
+ */
+static inline unsigned int nvmf_iov_copy(struct iovec *src_iovs, unsigned int src_num_iov,
+                                         unsigned int offset, unsigned int bytes,
+                                         struct iovec *dst_iovs)
+{
+    struct iovec *src_iov = NULL, *dst_iov;
+    unsigned int dst_num_iov = 0, i;
+
+    /* skip @offset bytes */
+    for (i = 0; i < src_num_iov; i++) {
+        src_iov = &src_iovs[i];
+        if (src_iov->iov_len > offset) {
+            break;
+        }
+
+        offset -= src_iov->iov_len;
+    }
+
+    /* no more space? */
+    if ((i == src_num_iov) || !src_iov) {
+        return 0;
+    }
+
+    /* any remaining bytes in the first iov? */
+    dst_iov = &dst_iovs[dst_num_iov++];
+    dst_iov->iov_base = (unsigned char *)src_iov->iov_base + offset;
+    dst_iov->iov_len = min_t(unsigned int, src_iov->iov_len - offset, bytes);
+    bytes -= dst_iov->iov_len;
+    if (!bytes) {
+        return dst_num_iov;
+    }
+
+    /* copy the remaining iov */
+    for (i++; i < src_num_iov; i++, dst_num_iov++) {
+        src_iov = &src_iovs[i];
+        dst_iov = &dst_iovs[dst_num_iov];
+        dst_iov->iov_base = src_iov->iov_base;
+        dst_iov->iov_len = min_t(unsigned int, src_iov->iov_len, bytes);
+        bytes -= dst_iov->iov_len;
+        if (!bytes) {
+            break;
+        }
+    }
+
+    return dst_num_iov + 1;
+}
+
 #ifdef MALLOC_DEBUG
 #define nvmf_calloc(x, y) _nvmf_calloc(x, y, __func__, __LINE__)
 #define nvmf_malloc(x) _nvmf_malloc(x, __func__, __LINE__)
